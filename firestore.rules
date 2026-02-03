@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. 管理員判斷
+    function isAdmin() {
+      return request.auth != null && 
+             exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isActive == true;
+    }
+    
+    // 2. 使用者資料集合
+    match /users/{userId} {
+      
+      // 讀取：依舊只有管理員能看
+      allow read: if isAdmin();
+      
+      // 寫入：非常嚴格的驗證
+      allow create, update: if request.auth != null && 
+          // 驗證：gameId 必須是字串
+          request.resource.data.gameId is string &&
+          
+          // 驗證：alliance 必須是字串
+          request.resource.data.alliance is string &&
+          
+          // 驗證：戰力必須是數字 (支援整數與小數)
+          request.resource.data.team1Power is number &&
+          request.resource.data.team2Power is number &&
+          request.resource.data.team3Power is number &&
+          
+          // 驗證：時間戳記必須是 Timestamp 格式
+          request.resource.data.updatedAt is timestamp &&
+          request.resource.data.submittedAt is timestamp &&
+          
+          // 額外保護：防止有人竄改 createdAt (如果它存在的話)
+          // 這裡的意思是：如果不包含 createdAt 欄位 OR createdAt 是時間格式，都放行
+          (!('createdAt' in request.resource.data) || request.resource.data.createdAt is timestamp);
+
+      // 刪除：只有管理員
+      allow delete: if isAdmin();
+    }
+    
+    // 3. 管理員區塊
+    match /admins/{adminId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+  }
+}
