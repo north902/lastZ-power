@@ -1,12 +1,15 @@
-import { 
-  collection, 
-  getDocs, 
-  doc, 
+import {
+  collection,
+  getDocs,
+  doc,
   deleteDoc,
+  updateDoc,
+  serverTimestamp,
   getDoc,
   query,
-  orderBy 
+  orderBy
 } from 'firebase/firestore';
+
 import { db } from '../config/firebase';
 
 // ==================== 管理員功能 ====================
@@ -21,7 +24,7 @@ export const getAllUsers = async () => {
     // 確保這裡的 updatedAt 欄位在 Firebase 裡真的存在
     const q = query(usersRef, orderBy('updatedAt', 'desc'));
     const querySnapshot = await getDocs(q);
-    
+
     const users = [];
     querySnapshot.forEach((doc) => {
       users.push({
@@ -29,7 +32,7 @@ export const getAllUsers = async () => {
         ...doc.data()
       });
     });
-    
+
     return users; // 回傳純陣列
   } catch (error) {
     console.error('取得所有使用者資料失敗:', error);
@@ -54,6 +57,27 @@ export const deleteUserData = async (userId) => {
 };
 
 /**
+ * 更新使用者資料（僅管理員）
+ * @param {string} userId - 使用者 ID
+ * @param {Object} data - 更新的資料
+ * @returns {Promise<Object>}
+ */
+export const updateUserData = async (userId, data) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, {
+      ...data,
+      updatedAt: serverTimestamp()
+    });
+    return { success: true };
+  } catch (error) {
+    console.error('更新使用者資料失敗:', error);
+    throw new Error('更新資料失敗：' + error.message);
+  }
+};
+
+
+/**
  * 檢查是否為管理員
  * @param {string} userId - Firebase Auth UID
  * @returns {Promise<boolean>}
@@ -62,12 +86,12 @@ export const checkIsAdmin = async (userId) => {
   try {
     const adminRef = doc(db, 'admins', userId);
     const adminDoc = await getDoc(adminRef);
-    
+
     if (adminDoc.exists()) {
       const data = adminDoc.data();
       return data.isActive === true;
     }
-    
+
     return false;
   } catch (error) {
     console.error('檢查管理員權限失敗:', error);
@@ -92,7 +116,7 @@ export const calculateStatistics = (users) => {
       minTotalPower: 0
     };
   }
-  
+
   const powers = users.map(user => {
     const t1 = Number(user.team1Power) || 0;
     const t2 = Number(user.team2Power) || 0;
@@ -104,14 +128,14 @@ export const calculateStatistics = (users) => {
       total: t1 + t2 + t3
     };
   });
-  
+
   const sumTeam1 = powers.reduce((sum, p) => sum + p.team1, 0);
   const sumTeam2 = powers.reduce((sum, p) => sum + p.team2, 0);
   const sumTeam3 = powers.reduce((sum, p) => sum + p.team3, 0);
   const sumTotal = powers.reduce((sum, p) => sum + p.total, 0);
-  
+
   const totalPowers = powers.map(p => p.total);
-  
+
   return {
     totalUsers: users.length,
     averageTeam1Power: Math.round(sumTeam1 / users.length),
@@ -140,16 +164,16 @@ export const exportToCSV = (users) => {
     '建立時間',
     '更新時間'
   ].join(',');
-  
+
   // CSV 資料列
   const rows = users.map(user => {
-    const total = (Number(user.team1Power) || 0) + 
-                  (Number(user.team2Power) || 0) + 
-                  (Number(user.team3Power) || 0);
-    
+    const total = (Number(user.team1Power) || 0) +
+      (Number(user.team2Power) || 0) +
+      (Number(user.team3Power) || 0);
+
     const createdAt = user.createdAt?.toDate?.() || new Date(user.createdAt);
     const updatedAt = user.updatedAt?.toDate?.() || new Date(user.updatedAt);
-    
+
     return [
       `"${user.gameId}"`,
       `"${user.alliance}"`,
@@ -161,7 +185,7 @@ export const exportToCSV = (users) => {
       `"${updatedAt.toLocaleString('zh-TW')}"`
     ].join(',');
   });
-  
+
   return [headers, ...rows].join('\n');
 };
 
@@ -175,11 +199,11 @@ export const downloadCSV = (csvContent, filename = 'game-power-data.csv') => {
   const BOM = '\uFEFF';
   const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  
+
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
   link.click();
-  
+
   URL.revokeObjectURL(url);
 };
