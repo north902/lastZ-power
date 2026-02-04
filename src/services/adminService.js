@@ -18,6 +18,7 @@ import { db } from '../config/firebase';
 export const getAllUsers = async () => {
   try {
     const usersRef = collection(db, 'users');
+    // 確保這裡的 updatedAt 欄位在 Firebase 裡真的存在
     const q = query(usersRef, orderBy('updatedAt', 'desc'));
     const querySnapshot = await getDocs(q);
     
@@ -29,10 +30,11 @@ export const getAllUsers = async () => {
       });
     });
     
-    return users;
+    return users; // 回傳純陣列
   } catch (error) {
     console.error('取得所有使用者資料失敗:', error);
-    throw new Error('取得資料失敗，請確認您的管理員權限');
+    // 這裡拋出錯誤，會被 AdminPanel 的 catch 抓到
+    throw new Error(error.message || '取得資料失敗，請確認管理員權限');
   }
 };
 

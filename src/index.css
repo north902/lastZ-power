@@ -1,3 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .animate-in {
+    animation-duration: 0.5s;
+    animation-fill-mode: both;
+  }
+
+  .fade-in {
+    animation-name: fadeIn;
+  }
+
+  .zoom-in {
+    animation-name: zoomIn;
+  }
+
+  .slide-in-from-bottom-4 {
+    animation-name: slideInBottom;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes zoomIn {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes slideInBottom {
+    from {
+      transform: translateY(1rem);
+      opacity: 0;
+    }
+
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
+
+
 * {
   margin: 0;
   padding: 0;
@@ -30,8 +89,9 @@ code {
   table {
     font-size: 12px;
   }
-  
-  th, td {
+
+  th,
+  td {
     padding: 8px 10px !important;
   }
 }

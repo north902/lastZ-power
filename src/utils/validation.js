@@ -97,3 +97,19 @@ export const formatDateTime = (timestamp) => {
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
+// 1. 補上 UserForm 需要的驗證規則物件
+export const VALIDATION_RULES = {
+  gameId: { required: '遊戲 ID 為必填' },
+  alliance: { required: '聯盟名稱為必填' },
+  team1Power: { required: '戰力為必填', min: { value: 0, message: '不能為負數' } },
+  team2Power: { required: '戰力為必填', min: { value: 0, message: '不能為負數' } },
+  team3Power: { required: '戰力為必填', min: { value: 0, message: '不能為負數' } }
+};
+
+// 2. 補上 formatPower (對應你 UserForm 裡用的名稱，其實就是呼叫你寫好的 formatNumber)
+export const formatPower = (num) => formatNumber(num);
+
+// 3. 補上關鍵的 calculateTotalPower (計算三隊總和)
+export const calculateTotalPower = (t1, t2, t3) => {
+  return (Number(t1) || 0) + (Number(t2) || 0) + (Number(t3) || 0);
+};

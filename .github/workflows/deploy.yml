@@ -1,9 +1,8 @@
-name: Build and Deploy to GitHub Pages
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches:
-      - master  # 當你推送到 main 分支時觸發
+    branches: [ master ] # 如果你的主分支叫 master 請改成 master
 
 permissions:
   contents: write
@@ -12,22 +11,21 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 📥
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js 🟢
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: 'npm'
 
-      - name: Install dependencies 📦
+      - name: Install dependencies
         run: npm install
 
-      - name: Build 🏗️
+      - name: Build
         run: npm run build
         env:
-          # 將 Firebase 環境變數傳給 GitHub 伺服器
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
           VITE_FIREBASE_AUTH_DOMAIN: ${{ secrets.VITE_FIREBASE_AUTH_DOMAIN }}
           VITE_FIREBASE_PROJECT_ID: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
@@ -35,8 +33,8 @@ jobs:
           VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.VITE_FIREBASE_MESSAGING_SENDER_ID }}
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
 
-      - name: Deploy 🚀
+      - name: Deploy
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          folder: dist # Vite 打包後的資料夾名稱
-          branch: gh-pages # 要部署到的分支
+          folder: dist # Vite 編譯後的資料夾
+          branch: gh-pages # 這是 GitHub Pages 會讀取的分支

@@ -1,212 +1,298 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-toastify';
-import { 
-  getAllUsers, 
-  deleteUserData, 
+import {
+  getAllUsers,
+  deleteUserData,
   calculateStatistics,
-  exportToCSV,
-  downloadCSV 
 } from '../../services/adminService';
-import { formatPower, formatDateTime, calculateTotalPower } from '../../utils/validation';
+import { formatPower, formatDateTime } from '../../utils/validation';
+import {
+  RefreshCw,
+  Download,
+  Search,
+  Trash2,
+  Users,
+  TrendingUp,
+  ChevronUp,
+  ChevronDown,
+  MoreVertical,
+  Filter,
+  BarChart3,
+  Calendar
+} from 'lucide-react';
 
-export default function AdminPanel() {
+const AdminPanel = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [statistics, setStatistics] = useState(null);
+  const [error, setError] = useState('');
+  const [stats, setStats] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState('updatedAt'); // updatedAt, totalPower, gameId
+  const [sortConfig, setSortConfig] = useState({ key: 'submittedAt', direction: 'desc' });
 
-  // 載入所有使用者資料
   useEffect(() => {
-    loadUsers();
+    loadAllUsers();
   }, []);
 
-  const loadUsers = async () => {
+  const loadAllUsers = async () => {
     setLoading(true);
+    setError('');
+
     try {
       const data = await getAllUsers();
-      setUsers(data);
-      
-      // 計算統計資料
-      const stats = calculateStatistics(data);
-      setStatistics(stats);
-    } catch (error) {
-      toast.error('載入資料失敗：' + error.message);
+      if (Array.isArray(data)) {
+        setUsers(data);
+        setStats(calculateStatistics(data));
+      }
+    } catch (err) {
+      setError('載入資料失敗：' + err.message);
+      toast.error('載入失敗');
     } finally {
       setLoading(false);
     }
   };
 
-  // 刪除使用者
+  const handleSort = (key) => {
+    let direction = 'desc';
+    if (sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key, direction });
+  };
+
   const handleDelete = async (userId, gameId) => {
-    if (!window.confirm(`確定要刪除 ${gameId} 的資料嗎？`)) {
+    if (!window.confirm(`⚠️ 確定要刪除 ${gameId} 的資料嗎？此操作不可恢復。`)) {
       return;
     }
 
     try {
-      await deleteUserData(userId);
-      toast.success('刪除成功');
-      loadUsers(); // 重新載入
-    } catch (error) {
-      toast.error('刪除失敗：' + error.message);
+      const result = await deleteUserData(userId);
+      if (result.success) {
+        toast.success('刪除成功');
+        loadAllUsers();
+      } else {
+        toast.error('刪除失敗：' + result.error);
+      }
+    } catch (err) {
+      toast.error('發生錯誤：' + err.message);
     }
   };
 
-  // 匯出 CSV
-  const handleExport = () => {
-    try {
-      const csv = exportToCSV(filteredUsers);
-      const timestamp = new Date().toISOString().slice(0, 10);
-      downloadCSV(csv, `game-power-data-${timestamp}.csv`);
-      toast.success('匯出成功！');
-    } catch (error) {
-      toast.error('匯出失敗：' + error.message);
-    }
-  };
-
-  // 篩選與排序
-  const filteredUsers = users
-    .filter(user => 
-      user.gameId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.alliance.toLowerCase().includes(searchTerm.toLowerCase())
+  const processedUsers = users
+    .filter(u =>
+      u.gameId?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.alliance?.toLowerCase().includes(searchTerm.toLowerCase())
     )
     .sort((a, b) => {
-      if (sortBy === 'updatedAt') {
-        return b.updatedAt?.toMillis() - a.updatedAt?.toMillis();
-      } else if (sortBy === 'totalPower') {
-        const totalA = calculateTotalPower(a.team1Power, a.team2Power, a.team3Power);
-        const totalB = calculateTotalPower(b.team1Power, b.team2Power, b.team3Power);
-        return totalB - totalA;
-      } else if (sortBy === 'gameId') {
-        return a.gameId.localeCompare(b.gameId);
+      let aValue, bValue;
+      if (sortConfig.key === 'totalPower') {
+        aValue = (a.team1Power || 0) + (a.team2Power || 0) + (a.team3Power || 0);
+        bValue = (b.team1Power || 0) + (b.team2Power || 0) + (b.team3Power || 0);
+      } else {
+        aValue = a[sortConfig.key];
+        bValue = b[sortConfig.key];
       }
+
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
 
+  const currentStats = {
+    totalUsers: processedUsers.length,
+    avgTeam1: processedUsers.length > 0
+      ? Math.round(processedUsers.reduce((sum, u) => sum + (u.team1Power || 0), 0) / processedUsers.length)
+      : 0,
+    avgTeam2: processedUsers.length > 0
+      ? Math.round(processedUsers.reduce((sum, u) => sum + (u.team2Power || 0), 0) / processedUsers.length)
+      : 0,
+    avgTeam3: processedUsers.length > 0
+      ? Math.round(processedUsers.reduce((sum, u) => sum + (u.team3Power || 0), 0) / processedUsers.length)
+      : 0,
+  };
+
+  const handleExport = () => {
+    const headers = ['遊戲ID', '聯盟', '第一隊', '第二隊', '第三隊', '總戰力', '更新時間'];
+    const rows = processedUsers.map(u => [
+      u.gameId,
+      u.alliance,
+      u.team1Power,
+      u.team2Power,
+      u.team3Power,
+      (u.team1Power || 0) + (u.team2Power || 0) + (u.team3Power || 0),
+      formatDateTime(u.submittedAt)
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `戰力資料_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    toast.info('準備下載 CSV...');
+  };
+
+  const getSortIcon = (key) => {
+    if (sortConfig.key !== key) return <RefreshCw size={12} className="opacity-20 translate-y-[2px]" />;
+    return sortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-blue-500" /> : <ChevronDown size={14} className="text-blue-500" />;
+  };
+
   if (loading) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="text-xl text-gray-600">載入中...</div>
+      <div className="flex flex-col items-center justify-center p-20 space-y-4">
+        <RefreshCw className="w-10 h-10 text-blue-500 animate-spin" />
+        <p className="text-gray-500 font-medium">全力載入大數據中...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6">
-      <div className="bg-white rounded-lg shadow-lg p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">管理員面板</h2>
-          <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-medium">
-            管理員
-          </span>
+    <div className="space-y-8 animate-in fade-in duration-500">
+      {/* 標題與操作區 */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h2 className="text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2">
+            <BarChart3 className="text-indigo-600" /> 聯盟數據管理中心
+          </h2>
+          <p className="text-sm text-gray-500">監控分析所有成員的戰力分佈與成長紀錄</p>
         </div>
-
-        {/* 統計資訊 */}
-        {statistics && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">總使用者數</div>
-              <div className="text-2xl font-bold text-blue-600">{statistics.totalUsers}</div>
-            </div>
-            <div className="bg-green-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">平均總戰力</div>
-              <div className="text-2xl font-bold text-green-600">
-                {formatPower(statistics.averageTotalPower)}
-              </div>
-            </div>
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">最高總戰力</div>
-              <div className="text-2xl font-bold text-purple-600">
-                {formatPower(statistics.maxTotalPower)}
-              </div>
-            </div>
-            <div className="bg-orange-50 p-4 rounded-lg">
-              <div className="text-sm text-gray-600">最低總戰力</div>
-              <div className="text-2xl font-bold text-orange-600">
-                {formatPower(statistics.minTotalPower)}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 操作列 */}
-        <div className="flex flex-col md:flex-row gap-4 mb-6">
-          <input
-            type="text"
-            placeholder="搜尋遊戲ID或聯盟..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-          
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        <div className="flex items-center gap-3">
+          <button
+            onClick={loadAllUsers}
+            className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2 text-sm font-bold"
           >
-            <option value="updatedAt">依更新時間</option>
-            <option value="totalPower">依總戰力</option>
-            <option value="gameId">依遊戲ID</option>
-          </select>
-
+            <RefreshCw size={16} /> <span className="hidden sm:inline">重新整理</span>
+          </button>
           <button
             onClick={handleExport}
-            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 flex items-center gap-2 text-sm font-bold"
           >
-            匯出 CSV
+            <Download size={16} /> 匯出數據庫
           </button>
         </div>
+      </div>
 
-        {/* 使用者列表 */}
+      {stats && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            { label: '顯示人數', value: processedUsers.length, icon: <Users />, color: 'blue' },
+            { label: 'S1 平均', value: formatPower(currentStats.avgTeam1), icon: <TrendingUp />, color: 'green' },
+            { label: 'S2 平均', value: formatPower(currentStats.avgTeam2), icon: <TrendingUp />, color: 'indigo' },
+            { label: 'S3 平均', value: formatPower(currentStats.avgTeam3), icon: <TrendingUp />, color: 'purple' },
+          ].map((item, idx) => (
+            <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4 group hover:shadow-md transition-shadow">
+              <div className={`w-12 h-12 rounded-xl bg-${item.color}-50 text-${item.color}-600 flex items-center justify-center group-hover:scale-110 transition-transform`}>
+                {item.icon}
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{item.label}</p>
+                <p className="text-xl font-black text-gray-800 tracking-tight">{item.value}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden">
+        {/* 表格工具列 */}
+        <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-grow">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="快速搜尋 遊戲 ID 或 聯盟..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all text-sm"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all text-xs font-bold flex items-center gap-2">
+              <Filter size={14} /> 篩選條件
+            </button>
+          </div>
+        </div>
+
+        {/* 骨幹表格 */}
         <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b-2 border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">遊戲ID</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">聯盟</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">第一隊</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">第二隊</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">第三隊</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">總戰力</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">更新時間</th>
-                <th className="px-4 py-3 text-center text-sm font-semibold text-gray-700">操作</th>
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-gray-50/50">
+                {[
+                  { key: 'gameId', label: '成員 ID' },
+                  { key: 'alliance', label: '所屬聯盟' },
+                  { key: 'team1Power', label: 'S1 戰力' },
+                  { key: 'team2Power', label: 'S2 戰力' },
+                  { key: 'team3Power', label: 'S3 戰力' },
+                  { key: 'totalPower', label: '總數據評估', focus: true },
+                  { key: 'submittedAt', label: '更新紀錄' },
+                ].map((th) => (
+                  <th
+                    key={th.key}
+                    onClick={() => handleSort(th.key)}
+                    className={`px-6 py-4 text-[11px] font-black uppercase tracking-wider cursor-pointer hover:bg-gray-100/50 transition-colors select-none ${th.focus ? 'text-indigo-600 bg-indigo-50/10' : 'text-gray-400'}`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      {th.label}
+                      {getSortIcon(th.key)}
+                    </div>
+                  </th>
+                ))}
+                <th className="px-6 py-4 text-[11px] font-black text-gray-400 uppercase tracking-wider text-right">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredUsers.length === 0 ? (
+            <tbody className="divide-y divide-gray-100">
+              {processedUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="px-4 py-8 text-center text-gray-500">
-                    {searchTerm ? '找不到符合的資料' : '尚無使用者資料'}
+                  <td colSpan="8" className="px-6 py-20 text-center">
+                    <div className="flex flex-col items-center space-y-2 opacity-30">
+                      <Search size={40} />
+                      <p className="font-bold">{searchTerm ? '找不到相關成員數據' : '目前尚無成員提交數據'}</p>
+                    </div>
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((user) => {
-                  const total = calculateTotalPower(user.team1Power, user.team2Power, user.team3Power);
+                processedUsers.map((user) => {
+                  const total = (user.team1Power || 0) + (user.team2Power || 0) + (user.team3Power || 0);
                   return (
-                    <tr key={user.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{user.gameId}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{user.alliance}</td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-700">
-                        {formatPower(user.team1Power)}
+                    <tr key={user.id} className="group hover:bg-indigo-50/20 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 flex items-center justify-center text-[10px] font-black text-gray-500">
+                            {user.gameId?.substring(0, 2).toUpperCase()}
+                          </div>
+                          <span className="font-bold text-gray-700">{user.gameId}</span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-700">
-                        {formatPower(user.team2Power)}
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 text-[11px] font-bold">
+                          {user.alliance}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-700">
-                        {formatPower(user.team3Power)}
+                      <td className="px-6 py-4 font-mono text-sm text-gray-500">{formatPower(user.team1Power)}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-gray-500">{formatPower(user.team2Power)}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-gray-500">{formatPower(user.team3Power)}</td>
+                      <td className="px-6 py-4">
+                        <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-blue-600 font-mono text-base tracking-tighter">
+                          {formatPower(total)}
+                        </span>
                       </td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">
-                        {formatPower(total)}
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5 text-gray-400 text-xs">
+                          <Calendar size={12} />
+                          {formatDateTime(user.submittedAt).split(' ')[0]}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">
-                        {formatDateTime(user.updatedAt)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-6 py-4 text-right">
                         <button
                           onClick={() => handleDelete(user.id, user.gameId)}
-                          className="text-red-600 hover:text-red-800 text-sm font-medium"
+                          className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                          title="刪除紀錄"
                         >
-                          刪除
+                          <Trash2 size={16} />
                         </button>
                       </td>
                     </tr>
@@ -217,11 +303,14 @@ export default function AdminPanel() {
           </table>
         </div>
 
-        {/* 顯示筆數 */}
-        <div className="mt-4 text-sm text-gray-600 text-center">
-          顯示 {filteredUsers.length} / {users.length} 筆資料
+        {/* 表格頁尾 */}
+        <div className="p-4 bg-gray-50/50 border-t border-gray-100 text-[10px] text-gray-400 font-bold uppercase tracking-widest flex justify-between">
+          <span>聯盟智庫 V2.0 穩定版</span>
+          <span>資料筆數: {processedUsers.length}</span>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default AdminPanel;

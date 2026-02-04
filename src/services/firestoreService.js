@@ -9,7 +9,7 @@ import {
   deleteDoc,
   serverTimestamp 
 } from 'firebase/firestore';
-import { db } from '../firebase-config';
+import { db } from "../config/firebase";
 
 // 儲存或更新使用者資料
 export const saveUserData = async (userId, formData) => {
