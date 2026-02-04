@@ -208,9 +208,21 @@ function App() {
           </div>
         </div>
       </footer>
-      <ToastContainer position="top-center" autoClose={3000} hideProgressBar={false} />
+      <ToastContainer
+        position="top-center"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover={false}
+        theme="light"
+      />
     </div>
   );
 }
+
 
 export default App;
