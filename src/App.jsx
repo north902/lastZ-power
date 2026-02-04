@@ -2,27 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { signOut, signInAnonymously } from 'firebase/auth';
 import { auth } from './config/firebase';
 import { useAuth } from './hooks/useAuth';
+import { useLanguage } from './contexts/LanguageContext';
 import Login from './components/Auth/AuthForm';
 import PowerForm from './components/UserForm/UserForm';
 import AdminPanel from './components/AdminPanel/AdminPanel';
 import {
   LogOut,
   ShieldCheck,
-  User as UserIcon,
   Layout,
-  Settings,
   ChevronRight,
   Loader2,
-  Sword
+  Sword,
+  Languages
 } from 'lucide-react';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-
 
 function App() {
   const [activeTab, setActiveTab] = useState('form');
   const [isLoginMode, setIsLoginMode] = useState(false);
   const { user, isAdmin, loading } = useAuth();
+  const { lang, t, toggleLang } = useLanguage();
 
   useEffect(() => {
     const storedLoginMode = localStorage.getItem('isLoginMode') === 'true';
@@ -70,7 +70,7 @@ function App() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 space-y-4">
         <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-        <p className="text-gray-500 font-medium animate-pulse">正在初始化戰力系統...</p>
+        <p className="text-gray-500 font-medium animate-pulse">{t('loading_system')}</p>
       </div>
     );
   }
@@ -84,7 +84,7 @@ function App() {
             onClick={handleBackToGuest}
             className="w-full mt-6 py-3 text-gray-400 hover:text-gray-600 text-sm font-bold flex items-center justify-center gap-2 transition-colors border border-transparent hover:border-gray-200 rounded-xl"
           >
-            ← 返回訪客輸入模式
+            {t('back_to_guest')}
           </button>
         </div>
       </div>
@@ -95,7 +95,7 @@ function App() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 space-y-4">
         <Sword className="w-12 h-12 text-blue-600 animate-bounce" />
-        <div className="text-gray-600 font-black tracking-widest uppercase text-xs">Preparing Combat Environment...</div>
+        <div className="text-gray-600 font-black tracking-widest uppercase text-xs">{t('preparing_env')}</div>
       </div>
     );
   }
@@ -110,22 +110,31 @@ function App() {
               <Sword className="text-white w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-lg font-black text-gray-900 tracking-tight leading-none">戰力追蹤儀</h1>
-              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mt-1 opacity-80">Alliance Intel V2</p>
+              <h1 className="text-lg font-black text-gray-900 tracking-tight leading-none">{t('title')}</h1>
+              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-[0.2em] mt-1 opacity-80">{t('subtitle')}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
+            {/* 語系切換 */}
+            <button
+              onClick={toggleLang}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full border border-gray-100 bg-gray-50 text-xs font-bold text-gray-600 hover:bg-gray-100 transition-all"
+            >
+              <Languages size={14} className="text-blue-500" />
+              {lang === 'zh' ? 'English' : '繁體中文'}
+            </button>
+
             <div className="hidden md:flex items-center gap-4 py-1.5 px-3 bg-gray-50 rounded-full border border-gray-100">
               <div className="flex items-center gap-2">
                 <div className={`w-2 h-2 rounded-full ${user.isAnonymous ? 'bg-orange-400 animate-pulse' : 'bg-green-500'}`}></div>
                 <span className="text-xs font-bold text-gray-600 tracking-wide">
-                  {user.isAnonymous ? '訪客模式' : user.email?.split('@')[0]}
+                  {user.isAnonymous ? t('guest_mode') : user.email?.split('@')[0]}
                 </span>
               </div>
               {isAdmin && (
                 <span className="bg-indigo-600 text-[10px] text-white px-2 py-0.5 rounded-full font-black uppercase tracking-wider shadow-sm">
-                  ADMIN
+                  {t('admin_tag')}
                 </span>
               )}
             </div>
@@ -134,7 +143,7 @@ function App() {
               <button
                 onClick={handleLogout}
                 className="group flex items-center gap-2 text-gray-400 hover:text-red-500 transition-colors p-2 rounded-lg hover:bg-red-50"
-                title="登出系統"
+                title={t('logout')}
               >
                 <LogOut size={20} className="group-hover:-translate-x-0.5 transition-transform" />
               </button>
@@ -145,8 +154,6 @@ function App() {
 
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 py-8 md:py-12">
-
-          {/* 管理員切換 Tab */}
           {isAdmin && (
             <div className="inline-flex p-1 bg-white border border-gray-200 rounded-2xl mb-10 shadow-sm">
               <button
@@ -156,7 +163,7 @@ function App() {
                   : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
                   }`}
               >
-                <Layout size={18} /> 個人填報
+                <Layout size={18} /> {t('personal_entry')}
               </button>
               <button
                 onClick={() => setActiveTab('admin')}
@@ -165,39 +172,37 @@ function App() {
                   : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
                   }`}
               >
-                <ShieldCheck size={18} /> 全盟管理
+                <ShieldCheck size={18} /> {t('all_management')}
               </button>
             </div>
           )}
 
-          {/* 主要內容容器 */}
           <div className="relative">
             {activeTab === 'admin' && isAdmin ? <AdminPanel /> : <PowerForm user={user} />}
           </div>
         </div>
       </main>
 
-      {/* 頁腳 */}
       <footer className="bg-white border-t border-gray-100 py-12 px-4">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
           <div className="flex flex-col items-center md:items-start gap-2">
             <div className="flex items-center gap-2 opacity-30 grayscale">
               <Sword size={20} />
-              <span className="font-black text-lg tracking-tighter">COMBAT TRACKER</span>
+              <span className="font-black text-lg tracking-tighter uppercase whitespace-nowrap">{t('title')}</span>
             </div>
-            <p className="text-gray-400 text-xs font-medium">© 2026 戰力追蹤儀 · 高效能數據集散地</p>
+            <p className="text-gray-400 text-xs font-medium">{t('footer_text')}</p>
           </div>
 
           <div className="flex items-center gap-8">
             <div className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em] hidden sm:block">
-              Intel Status: <span className="text-green-500">Operational</span>
+              Intel Status: <span className="text-green-500">{t('status_operational')}</span>
             </div>
             {user.isAnonymous && (
               <button
                 onClick={switchToAdminLogin}
                 className="group flex items-center gap-2 py-2 px-4 rounded-full border border-gray-200 text-[11px] font-black text-gray-500 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all shadow-sm"
               >
-                管理員伺服器登入口 <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                {t('admin_login_gate')} <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
               </button>
             )}
           </div>
@@ -207,7 +212,5 @@ function App() {
     </div>
   );
 }
-
-
 
 export default App;
