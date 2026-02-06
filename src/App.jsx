@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Loader2,
   Sword,
+  Map as MapIcon,
   Languages
 } from 'lucide-react';
 import { ToastContainer } from 'react-toastify';
@@ -174,11 +175,26 @@ function App() {
               >
                 <ShieldCheck size={18} /> {t('all_management')}
               </button>
+              <button
+                onClick={() => setActiveTab('planner')}
+                className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'planner'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                  }`}
+              >
+                <MapIcon size={18} /> {t('view_planner')}
+              </button>
             </div>
           )}
 
           <div className="relative">
-            {activeTab === 'admin' && isAdmin ? <AdminPanel /> : <PowerForm user={user} />}
+            {activeTab === 'admin' && isAdmin && <AdminPanel />}
+            {activeTab === 'planner' && isAdmin && (
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <AdminPanel forcePlanner={true} />
+              </div>
+            )}
+            {activeTab === 'form' && <PowerForm user={user} />}
           </div>
         </div>
       </main>

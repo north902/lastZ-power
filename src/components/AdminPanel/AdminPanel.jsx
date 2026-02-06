@@ -10,6 +10,7 @@ import {
 import { formatPower, formatDateTime } from '../../utils/validation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../hooks/useAuth';
+import { SvsPlanner } from './SvsPlanner';
 import {
   RefreshCw,
   Download,
@@ -29,10 +30,11 @@ import {
   User as UserIcon,
   Swords,
   PieChart,
-  LayoutGrid
+  LayoutGrid,
+  Map as MapIcon
 } from 'lucide-react';
 
-const AdminPanel = () => {
+const AdminPanel = ({ forcePlanner = false }) => {
   const { t } = useLanguage();
   const { adminData } = useAuth();
   const [users, setUsers] = useState([]);
@@ -40,7 +42,7 @@ const AdminPanel = () => {
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
   const [allianceStats, setAllianceStats] = useState([]);
-  const [viewMode, setViewMode] = useState('members'); // 'members' | 'alliances'
+  const [viewMode, setViewMode] = useState(forcePlanner ? 'planner' : 'members'); // 'members' | 'alliances' | 'planner'
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'submittedAt', direction: 'desc' });
 
@@ -330,44 +332,46 @@ const AdminPanel = () => {
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
-          <h2 className="text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2 uppercase">
-            <BarChart3 className="text-indigo-600" /> {t('admin_title')}
-          </h2>
-          <p className="text-sm text-gray-500">{t('admin_desc')}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="bg-white border border-gray-100 p-1 rounded-xl flex shadow-sm mr-2">
+      {!forcePlanner && (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2 uppercase">
+              <BarChart3 className="text-indigo-600" /> {t('admin_title')}
+            </h2>
+            <p className="text-sm text-gray-500">{t('admin_desc')}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="bg-white border border-gray-100 p-1 rounded-xl flex shadow-sm mr-2">
+              <button
+                onClick={() => setViewMode('members')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'members' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              >
+                <Users size={14} /> {t('view_members')}
+              </button>
+              <button
+                onClick={() => setViewMode('alliances')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'alliances' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              >
+                <LayoutGrid size={14} /> {t('view_alliances')}
+              </button>
+            </div>
             <button
-              onClick={() => setViewMode('members')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'members' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              onClick={loadAllUsers}
+              className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
-              <Users size={14} /> {t('view_members')}
+              <RefreshCw size={14} /> <span className="hidden sm:inline">{t('refresh')}</span>
             </button>
             <button
-              onClick={() => setViewMode('alliances')}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'alliances' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+              onClick={handleExport}
+              className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
             >
-              <LayoutGrid size={14} /> {t('view_alliances')}
+              <Download size={14} /> {t('export_csv')}
             </button>
           </div>
-          <button
-            onClick={loadAllUsers}
-            className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-          >
-            <RefreshCw size={14} /> <span className="hidden sm:inline">{t('refresh')}</span>
-          </button>
-          <button
-            onClick={handleExport}
-            className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-          >
-            <Download size={14} /> {t('export_csv')}
-          </button>
         </div>
-      </div>
+      )}
 
-      {stats && (
+      {stats && !forcePlanner && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { label: t('total_member'), value: users.length, icon: <Users />, color: 'blue' },
@@ -398,25 +402,31 @@ const AdminPanel = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden">
-        <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-grow">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-            <input
-              type="text"
-              placeholder={t('search_placeholder')}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all text-xs font-bold"
-            />
+      <div className={forcePlanner ? "" : "bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden"}>
+        {viewMode !== 'planner' && !forcePlanner && (
+          <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-4">
+            <div className="relative flex-grow">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input
+                type="text"
+                placeholder={t('search_placeholder')}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all text-xs font-bold"
+              />
+            </div>
+            <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-400 rounded-xl hover:bg-gray-50 transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+              <Filter size={14} /> {t('filter_options')}
+            </button>
           </div>
-          <button className="px-4 py-2.5 bg-white border border-gray-200 text-gray-400 rounded-xl hover:bg-gray-50 transition-all text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-            <Filter size={14} /> {t('filter_options')}
-          </button>
-        </div>
+        )}
 
-        <div className="overflow-x-auto">
-          {viewMode === 'alliances' ? (
+        <div className={forcePlanner ? "" : "overflow-x-auto"}>
+          {viewMode === 'planner' ? (
+            <div className={forcePlanner ? "" : "p-4 bg-slate-950"}>
+              <SvsPlanner />
+            </div>
+          ) : viewMode === 'alliances' ? (
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50/50">
