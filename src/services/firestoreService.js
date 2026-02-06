@@ -34,7 +34,7 @@ export const saveUserData = async (userId, formData) => {
     const userData = {
       // 這裡存原本輸入的 ID (包含斜線也沒關係，顯示用)
       gameId: formData.gameId.trim(),
-      alliance: formData.alliance.trim(),
+      alliance: formData.alliance.trim(), // 恢復原樣，不強制轉大寫
       team1Power: Number(formData.team1Power),
       team2Power: Number(formData.team2Power),
       team3Power: Number(formData.team3Power),

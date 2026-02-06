@@ -534,7 +534,7 @@ const AdminPanel = () => {
                             <span className="font-bold text-gray-800 tracking-tight">{user.gameId}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-5 text-xs font-bold text-gray-500 uppercase tracking-tighter">
+                        <td className="px-6 py-5 text-xs font-bold text-gray-500 tracking-tighter">
                           {user.alliance}
                         </td>
                         <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team1Power)}</td>
