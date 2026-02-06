@@ -4,10 +4,12 @@ import {
   doc,
   deleteDoc,
   updateDoc,
+  setDoc,
   serverTimestamp,
   getDoc,
   query,
-  orderBy
+  orderBy,
+  where
 } from 'firebase/firestore';
 
 import { db } from '../config/firebase';
@@ -16,13 +18,26 @@ import { db } from '../config/firebase';
 
 /**
  * 取得所有使用者資料（僅管理員）
+ * @param {Array} allowedAlliances - 允許訪問的聯盟列表
  * @returns {Promise<Array>}
  */
-export const getAllUsers = async () => {
+export const getAllUsers = async (allowedAlliances = []) => {
   try {
     const usersRef = collection(db, 'users');
-    // 確保這裡的 updatedAt 欄位在 Firebase 裡真的存在
-    const q = query(usersRef, orderBy('updatedAt', 'desc'));
+    let q;
+
+    // 如果沒有特定限制，或者限制中包含 '*'，則抓取全部
+    if (!allowedAlliances || allowedAlliances.length === 0 || allowedAlliances.includes('*')) {
+      q = query(usersRef, orderBy('updatedAt', 'desc'));
+    } else {
+      // 否則，只抓取該管理員被授權的聯盟
+      q = query(
+        usersRef,
+        where('alliance', 'in', allowedAlliances),
+        orderBy('updatedAt', 'desc')
+      );
+    }
+
     const querySnapshot = await getDocs(q);
 
     const users = [];
@@ -64,15 +79,37 @@ export const deleteUserData = async (userId) => {
  */
 export const updateUserData = async (userId, data) => {
   try {
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      ...data,
-      updatedAt: serverTimestamp()
-    });
+    // 1. 準備純淨的資料，剔除 id 欄位 (因為 Key 已經在路徑中了)
+    const { id, ...cleanData } = data;
+
+    // 處理新 ID 的 Key 格式
+    let newCleanId = data.gameId.trim().replace(/\//g, '_');
+
+    // 2. 如果 Key 有變動（搬家模式）
+    if (newCleanId !== userId) {
+      const newUserRef = doc(db, 'users', newCleanId);
+      const oldUserRef = doc(db, 'users', userId);
+
+      // 先在新位置存入完整資料 (包含原本的 submittedAt)
+      await setDoc(newUserRef, {
+        ...cleanData,
+        updatedAt: serverTimestamp()
+      });
+
+      // 成功後刪除舊位置
+      await deleteDoc(oldUserRef);
+    } else {
+      // 3. 一般更新模式
+      const userRef = doc(db, 'users', userId);
+      await updateDoc(userRef, {
+        ...cleanData,
+        updatedAt: serverTimestamp()
+      });
+    }
     return { success: true };
   } catch (error) {
     console.error('更新使用者資料失敗:', error);
-    throw new Error('更新資料失敗：' + error.message);
+    throw new Error(error.message || '更新資料失敗');
   }
 };
 
@@ -145,6 +182,57 @@ export const calculateStatistics = (users) => {
     maxTotalPower: Math.max(...totalPowers),
     minTotalPower: Math.min(...totalPowers)
   };
+};
+
+/**
+ * 按聯盟分組計算統計資料
+ * @param {Array} users - 使用者陣列
+ * @returns {Array} 聯盟統計陣列
+ */
+export const calculateAllianceStatistics = (users) => {
+  if (!users || users.length === 0) return [];
+
+  const allianceMap = {};
+
+  users.forEach(user => {
+    const alliance = user.alliance || '未分類';
+    if (!allianceMap[alliance]) {
+      allianceMap[alliance] = {
+        name: alliance,
+        memberCount: 0,
+        totalPower: 0,
+        avgPower: 0,
+        team1Power: 0,
+        team2Power: 0,
+        team3Power: 0,
+        lastUpdated: null
+      };
+    }
+
+    const t1 = Number(user.team1Power) || 0;
+    const t2 = Number(user.team2Power) || 0;
+    const t3 = Number(user.team3Power) || 0;
+    const total = t1 + t2 + t3;
+    const updated = user.submittedAt?.toDate?.() || new Date(user.submittedAt);
+
+    allianceMap[alliance].memberCount++;
+    allianceMap[alliance].totalPower += total;
+    allianceMap[alliance].team1Power += t1;
+    allianceMap[alliance].team2Power += t2;
+    allianceMap[alliance].team3Power += t3;
+
+    if (!allianceMap[alliance].lastUpdated || updated > allianceMap[alliance].lastUpdated) {
+      allianceMap[alliance].lastUpdated = updated;
+    }
+  });
+
+  return Object.values(allianceMap).map(alliance => ({
+    ...alliance,
+    avgPower: Math.round(alliance.totalPower / alliance.memberCount),
+    avgTeam1Power: Math.round(alliance.team1Power / alliance.memberCount),
+    avgTeam2Power: Math.round(alliance.team2Power / alliance.memberCount),
+    avgTeam3Power: Math.round(alliance.team3Power / alliance.memberCount)
+  })).sort((a, b) => b.totalPower - a.totalPower);
 };
 
 /**

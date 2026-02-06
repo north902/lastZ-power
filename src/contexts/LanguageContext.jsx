@@ -88,6 +88,11 @@ const translations = {
         intel_v2: '聯盟智庫 V2.0 穩定版',
         data_count: '資料筆數',
         loading_data: '全力載入大數據中...',
+        alliance_total_power: '聯盟總體戰力',
+        alliance_avg_power: '成員平均實力',
+        view_members: '成員清單',
+        view_alliances: '聯盟彙整',
+        total_member: '總成員數',
 
     },
     en: {
@@ -177,6 +182,11 @@ const translations = {
         intel_v2: 'Alliance Intel V2.0 Stable',
         data_count: 'Total Records',
         loading_data: 'Loading Big Data...',
+        alliance_total_power: 'Total Alliance Power',
+        alliance_avg_power: 'Avg Member Power',
+        view_members: 'Member List',
+        view_alliances: 'Alliance Summary',
+        total_member: 'Total Members',
 
     }
 };

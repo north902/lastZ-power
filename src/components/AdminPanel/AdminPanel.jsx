@@ -5,9 +5,11 @@ import {
   deleteUserData,
   updateUserData,
   calculateStatistics,
+  calculateAllianceStatistics
 } from '../../services/adminService';
 import { formatPower, formatDateTime } from '../../utils/validation';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../hooks/useAuth';
 import {
   RefreshCw,
   Download,
@@ -25,15 +27,20 @@ import {
   Save,
   Shield,
   User as UserIcon,
-  Swords
+  Swords,
+  PieChart,
+  LayoutGrid
 } from 'lucide-react';
 
 const AdminPanel = () => {
   const { t } = useLanguage();
+  const { adminData } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
+  const [allianceStats, setAllianceStats] = useState([]);
+  const [viewMode, setViewMode] = useState('members'); // 'members' | 'alliances'
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'submittedAt', direction: 'desc' });
 
@@ -50,18 +57,22 @@ const AdminPanel = () => {
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
-    loadAllUsers();
-  }, []);
+    if (adminData) {
+      loadAllUsers();
+    }
+  }, [adminData]);
 
   const loadAllUsers = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const data = await getAllUsers();
+      // 傳遞管理員授權的聯盟列表
+      const data = await getAllUsers(adminData?.allowedAlliances || []);
       if (Array.isArray(data)) {
         setUsers(data);
         setStats(calculateStatistics(data));
+        setAllianceStats(calculateAllianceStatistics(data));
       }
     } catch (err) {
       setError(t('error_occurred') + err.message);
@@ -121,6 +132,7 @@ const AdminPanel = () => {
     setIsUpdating(true);
     try {
       const dataToUpdate = {
+        ...editingUser, // 展開原本的所有資料 (包含 submittedAt, createdAt 等)
         gameId: editFormData.gameId,
         alliance: editFormData.alliance,
         team1Power: Number(editFormData.team1Power || 0),
@@ -326,6 +338,20 @@ const AdminPanel = () => {
           <p className="text-sm text-gray-500">{t('admin_desc')}</p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="bg-white border border-gray-100 p-1 rounded-xl flex shadow-sm mr-2">
+            <button
+              onClick={() => setViewMode('members')}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'members' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+            >
+              <Users size={14} /> {t('view_members')}
+            </button>
+            <button
+              onClick={() => setViewMode('alliances')}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'alliances' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+            >
+              <LayoutGrid size={14} /> {t('view_alliances')}
+            </button>
+          </div>
           <button
             onClick={loadAllUsers}
             className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
@@ -344,10 +370,20 @@ const AdminPanel = () => {
       {stats && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            { label: t('display_count'), value: processedUsers.length, icon: <Users />, color: 'blue' },
-            { label: t('avg_s1'), value: formatPower(currentStats.avgTeam1), icon: <TrendingUp />, color: 'green' },
-            { label: t('avg_s2'), value: formatPower(currentStats.avgTeam2), icon: <TrendingUp />, color: 'indigo' },
-            { label: t('avg_s3'), value: formatPower(currentStats.avgTeam3), icon: <TrendingUp />, color: 'purple' },
+            { label: t('total_member'), value: users.length, icon: <Users />, color: 'blue' },
+            {
+              label: t('alliance_total_power'),
+              value: formatPower(users.reduce((sum, u) => sum + (u.team1Power || 0) + (u.team2Power || 0) + (u.team3Power || 0), 0)),
+              icon: <PieChart />,
+              color: 'green'
+            },
+            {
+              label: t('alliance_avg_power'),
+              value: formatPower(users.length > 0 ? Math.round(users.reduce((sum, u) => sum + (u.team1Power || 0) + (u.team2Power || 0) + (u.team3Power || 0), 0) / users.length) : 0),
+              icon: <TrendingUp />,
+              color: 'indigo'
+            },
+            { label: t('data_count'), value: users.length, icon: <BarChart3 />, color: 'purple' },
           ].map((item, idx) => (
             <div key={idx} className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-center gap-4 group hover:shadow-md transition-shadow">
               <div className={`w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center group-hover:bg-indigo-50 transition-colors`}>
@@ -380,105 +416,172 @@ const AdminPanel = () => {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50/50">
-                {[
-                  { key: 'gameId', label: t('member_id') },
-                  { key: 'alliance', label: t('alliance_label') },
-                  { key: 'team1Power', label: t('s1_power') },
-                  { key: 'team2Power', label: t('s2_power') },
-                  { key: 'team3Power', label: t('s3_power') },
-                  { key: 'totalPower', label: t('total_eval'), focus: true },
-                  { key: 'submittedAt', label: t('update_record') },
-                ].map((th) => (
-                  <th
-                    key={th.key}
-                    onClick={() => handleSort(th.key)}
-                    className={`px-6 py-4 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-gray-100/50 transition-colors select-none ${th.focus ? 'text-indigo-600 bg-indigo-50/10' : 'text-gray-400'}`}
-                  >
-                    <div className="flex items-center justify-between gap-1">
-                      {th.label}
-                      {getSortIcon(th.key)}
-                    </div>
-                  </th>
-                ))}
-                <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">{t('actions')}</th>
-
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {processedUsers.length === 0 ? (
-                <tr>
-                  <td colSpan="8" className="px-6 py-20 text-center">
-                    <div className="flex flex-col items-center space-y-4 opacity-20">
-                      <Search size={48} />
-                      <p className="font-bold uppercase text-xs tracking-widest">{searchTerm ? t('no_results') : t('no_data')}</p>
-                    </div>
-                  </td>
+          {viewMode === 'alliances' ? (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50/50">
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{t('alliance_label')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{t('total_member')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-indigo-600 bg-indigo-50/10 uppercase tracking-widest">{t('avg_s1')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-indigo-600 bg-indigo-50/10 uppercase tracking-widest">{t('avg_s2')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-indigo-600 bg-indigo-50/10 uppercase tracking-widest">{t('avg_s3')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{t('alliance_avg_power')}</th>
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{t('last_updated')}</th>
                 </tr>
-              ) : (
-                processedUsers.map((user) => {
-                  const total = (user.team1Power || 0) + (user.team2Power || 0) + (user.team3Power || 0);
-                  return (
-                    <tr key={user.id} className="group hover:bg-indigo-50/20 transition-colors">
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-500 border border-gray-200">
-                            {user.gameId?.substring(0, 2).toUpperCase()}
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {allianceStats.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" className="px-6 py-20 text-center text-gray-400 font-bold uppercase text-xs tracking-widest opacity-20">
+                      {t('no_data')}
+                    </td>
+                  </tr>
+                ) : (
+                  allianceStats
+                    .filter(a => a.name.toLowerCase().includes(searchTerm.toLowerCase()))
+                    .map((alliance) => (
+                      <tr key={alliance.name} className="group hover:bg-indigo-50/20 transition-colors">
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-[10px] font-black text-indigo-500 border border-indigo-200">
+                              <Shield size={14} />
+                            </div>
+                            <span className="font-bold text-gray-800 tracking-tight">{alliance.name}</span>
                           </div>
-                          <span className="font-bold text-gray-800 tracking-tight">{user.gameId}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-xs font-bold text-gray-500 uppercase tracking-tighter">
-                        {user.alliance}
-                      </td>
-                      <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team1Power)}</td>
-                      <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team2Power)}</td>
-                      <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team3Power)}</td>
-                      <td className="px-6 py-5">
-                        <span className="font-black text-indigo-600 font-mono text-base tabular-nums tracking-tighter">
-                          {formatPower(total)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-1.5 text-gray-400 text-[10px] font-bold uppercase tabular-nums">
-                          <Calendar size={12} />
-                          {formatDateTime(user.submittedAt).split(' ')[0]}
-                        </div>
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            onClick={() => handleEditClick(user)}
-                            className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                            title={t('edit')}
-                          >
-                            <Edit3 size={16} />
-                          </button>
-
-                          <button
-                            onClick={() => handleDelete(user.id, user.gameId)}
-                            className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                            title={t('delete')}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-2">
+                            <Users size={14} className="text-gray-300" />
+                            <span className="font-bold text-gray-600 tabular-nums">{alliance.memberCount}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="font-black text-indigo-600 font-mono text-sm tabular-nums tracking-tighter">
+                            {formatPower(alliance.avgTeam1Power)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="font-black text-indigo-600 font-mono text-sm tabular-nums tracking-tighter">
+                            {formatPower(alliance.avgTeam2Power)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className="font-black text-indigo-600 font-mono text-sm tabular-nums tracking-tighter">
+                            {formatPower(alliance.avgTeam3Power)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">
+                          {formatPower(alliance.avgPower)}
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-1.5 text-gray-400 text-[10px] font-bold uppercase tabular-nums">
+                            <Calendar size={12} />
+                            {alliance.lastUpdated ? alliance.lastUpdated.toLocaleString('zh-TW').split(' ')[0] : '---'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          ) : (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50/50">
+                  {[
+                    { key: 'gameId', label: t('member_id') },
+                    { key: 'alliance', label: t('alliance_label') },
+                    { key: 'team1Power', label: t('s1_power') },
+                    { key: 'team2Power', label: t('s2_power') },
+                    { key: 'team3Power', label: t('s3_power') },
+                    { key: 'totalPower', label: t('total_eval'), focus: true },
+                    { key: 'submittedAt', label: t('update_record') },
+                  ].map((th) => (
+                    <th
+                      key={th.key}
+                      onClick={() => handleSort(th.key)}
+                      className={`px-6 py-4 text-[10px] font-black uppercase tracking-widest cursor-pointer hover:bg-gray-100/50 transition-colors select-none ${th.focus ? 'text-indigo-600 bg-indigo-50/10' : 'text-gray-400'}`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        {th.label}
+                        {getSortIcon(th.key)}
+                      </div>
+                    </th>
+                  ))}
+                  <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">{t('actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {processedUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="px-6 py-20 text-center">
+                      <div className="flex flex-col items-center space-y-4 opacity-20">
+                        <Search size={48} />
+                        <p className="font-bold uppercase text-xs tracking-widest">{searchTerm ? t('no_results') : t('no_data')}</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  processedUsers.map((user) => {
+                    const total = (user.team1Power || 0) + (user.team2Power || 0) + (user.team3Power || 0);
+                    return (
+                      <tr key={user.id} className="group hover:bg-indigo-50/20 transition-colors">
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-black text-gray-500 border border-gray-200">
+                              {user.gameId?.substring(0, 2).toUpperCase()}
+                            </div>
+                            <span className="font-bold text-gray-800 tracking-tight">{user.gameId}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 text-xs font-bold text-gray-500 uppercase tracking-tighter">
+                          {user.alliance}
+                        </td>
+                        <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team1Power)}</td>
+                        <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team2Power)}</td>
+                        <td className="px-6 py-5 font-mono text-sm text-gray-400 tabular-nums">{formatPower(user.team3Power)}</td>
+                        <td className="px-6 py-5">
+                          <span className="font-black text-indigo-600 font-mono text-base tabular-nums tracking-tighter">
+                            {formatPower(total)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-1.5 text-gray-400 text-[10px] font-bold uppercase tabular-nums">
+                            <Calendar size={12} />
+                            {formatDateTime(user.submittedAt).split(' ')[0]}
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleEditClick(user)}
+                              className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                              title={t('edit')}
+                            >
+                              <Edit3 size={16} />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(user.id, user.gameId)}
+                              className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                              title={t('delete')}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
 
         <div className="p-4 bg-gray-50/50 border-t border-gray-100 text-[9px] font-black text-gray-300 uppercase tracking-[0.2em] flex justify-between items-center">
           <span>{t('intel_v2')}</span>
           <span className="bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-400">
-            {t('data_count')}: {processedUsers.length}
+            {viewMode === 'alliances' ? t('alliance_label') : t('data_count')}: {viewMode === 'alliances' ? allianceStats.length : processedUsers.length}
           </span>
         </div>
       </div>
