@@ -3,6 +3,7 @@ import TuesdayCalculator from './TuesdayCalculator';
 import WednesdayCalculator from './WednesdayCalculator';
 import ThursdayCalculator from './ThursdayCalculator';
 import FridayCalculator from './FridayCalculator';
+import SaturdayCalculator from './SaturdayCalculator';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { Calendar } from 'lucide-react';
 
@@ -18,6 +19,7 @@ const DuelCalculator = () => {
             case 3: return t('wed_title');
             case 4: return t('thu_title');
             case 5: return t('fri_title');
+            case 6: return t('sat_title');
             default: return t('duel_calculator');
         }
     };
@@ -28,12 +30,13 @@ const DuelCalculator = () => {
             case 3: return t('wed_desc');
             case 4: return t('thu_desc');
             case 5: return t('fri_desc');
+            case 6: return t('sat_desc');
             default: return t('calc_dev_desc');
         }
     };
 
     const isDayEnabled = (day) => {
-        return [2, 3, 4, 5].includes(day);
+        return [2, 3, 4, 5, 6].includes(day);
     };
 
     return (
@@ -73,6 +76,7 @@ const DuelCalculator = () => {
                 {selectedDay === 3 && <WednesdayCalculator />}
                 {selectedDay === 4 && <ThursdayCalculator />}
                 {selectedDay === 5 && <FridayCalculator />}
+                {selectedDay === 6 && <SaturdayCalculator />}
 
                 {!isDayEnabled(selectedDay) && (
                     <div className="bg-white rounded-[2rem] p-12 text-center border-2 border-dashed border-gray-100">
