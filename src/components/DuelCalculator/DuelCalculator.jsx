@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import MondayCalculator from './MondayCalculator';
 import TuesdayCalculator from './TuesdayCalculator';
 import WednesdayCalculator from './WednesdayCalculator';
 import ThursdayCalculator from './ThursdayCalculator';
@@ -15,6 +16,7 @@ const DuelCalculator = () => {
 
     const getDayTitle = (day) => {
         switch (day) {
+            case 1: return t('mon_title');
             case 2: return t('tue_title');
             case 3: return t('wed_title');
             case 4: return t('thu_title');
@@ -26,6 +28,7 @@ const DuelCalculator = () => {
 
     const getDayDesc = (day) => {
         switch (day) {
+            case 1: return t('mon_desc');
             case 2: return t('tue_desc');
             case 3: return t('wed_desc');
             case 4: return t('thu_desc');
@@ -36,7 +39,7 @@ const DuelCalculator = () => {
     };
 
     const isDayEnabled = (day) => {
-        return [2, 3, 4, 5, 6].includes(day);
+        return [1, 2, 3, 4, 5, 6].includes(day);
     };
 
     return (
@@ -72,6 +75,7 @@ const DuelCalculator = () => {
             </div>
 
             <div className="transition-all duration-300">
+                {selectedDay === 1 && <MondayCalculator />}
                 {selectedDay === 2 && <TuesdayCalculator />}
                 {selectedDay === 3 && <WednesdayCalculator />}
                 {selectedDay === 4 && <ThursdayCalculator />}
