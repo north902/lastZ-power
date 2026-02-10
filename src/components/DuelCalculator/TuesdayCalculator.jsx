@@ -272,7 +272,7 @@ const TuesdayCalculator = () => {
                     <div className="space-y-1">
                         <div className="flex items-center gap-2">
                             <div className="px-3 py-1 bg-blue-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-blue-400/30">Alliance Duel</div>
-                            <div className="px-3 py-1 bg-orange-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-orange-400/30">{t('tuesday')}</div>
+                            <div className="px-3 py-1 bg-blue-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-blue-400/30">{t('tuesday')}</div>
                         </div>
                         <h2 className="text-3xl font-black tracking-tight">{t('tue_title')}</h2>
                         <p className="text-blue-200/60 text-sm font-medium">{t('tue_desc')}</p>

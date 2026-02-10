@@ -281,7 +281,7 @@ const MondayCalculator = () => {
                     <div className="space-y-1">
                         <div className="flex items-center gap-2">
                             <div className="px-3 py-1 bg-cyan-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-cyan-400/30">Alliance Duel</div>
-                            <div className="px-3 py-1 bg-slate-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-slate-400/30">{t('monday')}</div>
+                            <div className="px-3 py-1 bg-cyan-500/20 rounded-full text-[10px] font-black uppercase tracking-[0.2em] border border-cyan-400/30">{t('monday')}</div>
                         </div>
                         <h2 className="text-3xl font-black tracking-tight">{t('mon_title')}</h2>
                         <p className="text-slate-200/60 text-sm font-medium">{t('mon_desc')}</p>
