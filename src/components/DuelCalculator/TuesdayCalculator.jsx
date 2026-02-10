@@ -19,6 +19,39 @@ import {
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
+// Move InputCard outside to prevent focus loss on re-renders
+const InputCard = ({ icon: Icon, title, name, inputsKey, unit, pts, colorClass, value, onChange, score, t }) => (
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all group">
+        <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-lg ${colorClass} bg-opacity-10`}>
+                    <Icon size={18} className={colorClass.replace('bg-', 'text-')} />
+                </div>
+                <span className="font-bold text-gray-700 text-sm">{title}</span>
+            </div>
+            <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{pts} pts / {unit}</span>
+        </div>
+        <div className="relative">
+            <input
+                type="text"
+                name={inputsKey}
+                value={value}
+                onChange={onChange}
+                placeholder="0"
+                className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-base"
+            />
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                {unit}
+            </div>
+        </div>
+        <div className="mt-2 flex justify-end">
+            <span className="text-xs font-bold text-gray-400">
+                {t('est_score')}: <span className="text-blue-600 font-black">{score}</span>
+            </span>
+        </div>
+    </div>
+);
+
 const TuesdayCalculator = () => {
     const { t } = useLanguage();
 
@@ -134,38 +167,6 @@ const TuesdayCalculator = () => {
         if (!num || isNaN(num)) return '0';
         return new Intl.NumberFormat('en-US').format(Math.floor(num));
     };
-
-    const InputCard = ({ icon: Icon, title, name, inputsKey, unit, pts, colorClass }) => (
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all group">
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                    <div className={`p-2 rounded-lg ${colorClass} bg-opacity-10`}>
-                        <Icon size={18} className={colorClass.replace('bg-', 'text-')} />
-                    </div>
-                    <span className="font-bold text-gray-700 text-sm">{title}</span>
-                </div>
-                <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{pts} pts / {unit}</span>
-            </div>
-            <div className="relative">
-                <input
-                    type="text"
-                    name={inputsKey}
-                    value={inputs[inputsKey]}
-                    onChange={handleInputChange}
-                    placeholder="0"
-                    className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-base"
-                />
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                    {unit}
-                </div>
-            </div>
-            <div className="mt-2 flex justify-end">
-                <span className="text-xs font-bold text-gray-400">
-                    {t('est_score')}: <span className="text-blue-600 font-black">{formatNumber(results[name])}</span>
-                </span>
-            </div>
-        </div>
-    );
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -366,13 +367,13 @@ const TuesdayCalculator = () => {
                     </div>
                 </div>
 
-                <InputCard icon={Trophy} title={t('bounty_title')} name="bounty" inputsKey="bounty_count" unit={t('unit_count')} pts={formatNumber(baseValues.bounty_orange)} colorClass="bg-yellow-500" />
-                <InputCard icon={Hammer} title={t('refine_title')} name="refine" inputsKey="refine_count" unit={t('unit_item')} pts={formatNumber(baseValues.refine_stone)} colorClass="bg-red-500" />
-                <InputCard icon={Trophy} title={t('pulse_title')} name="pulse" inputsKey="pulse_count" unit={t('unit_item')} pts={formatNumber(baseValues.pulse_module)} colorClass="bg-purple-500" />
-                <InputCard icon={Users} title={t('sur_orange')} name="sur_orange" inputsKey="sur_orange_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_orange)} colorClass="bg-orange-600" />
-                <InputCard icon={Users} title={t('sur_purple')} name="sur_purple" inputsKey="sur_purple_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_purple)} colorClass="bg-purple-400" />
-                <InputCard icon={Users} title={t('sur_blue')} name="sur_blue" inputsKey="sur_blue_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_blue)} colorClass="bg-blue-400" />
-                <InputCard icon={Gem} title={t('diamond_gift')} name="diamond" inputsKey="diamond_count" unit={t('unit_item')} pts={baseValues.diamond_1} colorClass="bg-cyan-500" />
+                <InputCard icon={Trophy} title={t('bounty_title')} name="bounty" inputsKey="bounty_count" unit={t('unit_count')} pts={formatNumber(baseValues.bounty_orange)} colorClass="bg-yellow-500" value={inputs.bounty_count} onChange={handleInputChange} score={formatNumber(results.bounty)} t={t} />
+                <InputCard icon={Hammer} title={t('refine_title')} name="refine" inputsKey="refine_count" unit={t('unit_item')} pts={formatNumber(baseValues.refine_stone)} colorClass="bg-red-500" value={inputs.refine_count} onChange={handleInputChange} score={formatNumber(results.refine)} t={t} />
+                <InputCard icon={Trophy} title={t('pulse_title')} name="pulse" inputsKey="pulse_count" unit={t('unit_item')} pts={formatNumber(baseValues.pulse_module)} colorClass="bg-purple-500" value={inputs.pulse_count} onChange={handleInputChange} score={formatNumber(results.pulse)} t={t} />
+                <InputCard icon={Users} title={t('sur_orange')} name="sur_orange" inputsKey="sur_orange_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_orange)} colorClass="bg-orange-600" value={inputs.sur_orange_count} onChange={handleInputChange} score={formatNumber(results.sur_orange)} t={t} />
+                <InputCard icon={Users} title={t('sur_purple')} name="sur_purple" inputsKey="sur_purple_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_purple)} colorClass="bg-purple-400" value={inputs.sur_purple_count} onChange={handleInputChange} score={formatNumber(results.sur_purple)} t={t} />
+                <InputCard icon={Users} title={t('sur_blue')} name="sur_blue" inputsKey="sur_blue_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_blue)} colorClass="bg-blue-400" value={inputs.sur_blue_count} onChange={handleInputChange} score={formatNumber(results.sur_blue)} t={t} />
+                <InputCard icon={Gem} title={t('diamond_gift')} name="diamond" inputsKey="diamond_count" unit={t('unit_item')} pts={baseValues.diamond_1} colorClass="bg-cyan-500" value={inputs.diamond_count} onChange={handleInputChange} score={formatNumber(results.diamond)} t={t} />
             </div>
 
             <div className="bg-blue-50/50 rounded-2xl p-6 border border-blue-100 flex gap-4">
