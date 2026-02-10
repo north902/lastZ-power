@@ -282,10 +282,10 @@ const FridayCalculator = () => {
                 </div>
 
                 {/* Building Power */}
-                <div className="bg-white rounded-2xl p-4 shadow-sm border border-blue-100 border-l-4 border-l-blue-500 hover:shadow-md transition-all">
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-orange-100 border-l-4 border-l-orange-500 hover:shadow-md transition-all">
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
-                            <div className="p-2 rounded-lg bg-blue-500 bg-opacity-10"><Building2 size={18} className="text-blue-500" /></div>
+                            <div className="p-2 rounded-lg bg-orange-500 bg-opacity-10"><Building2 size={18} className="text-orange-500" /></div>
                             <span className="font-bold text-gray-700 text-sm">{t('power_increase')}</span>
                         </div>
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{baseValues.build_power_10} pts / 10 Power</span>
@@ -293,15 +293,15 @@ const FridayCalculator = () => {
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                             <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('power_start')}</span>
-                            <input type="text" name="build_power_start" value={inputs.build_power_start} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-blue-500/20 transition-all text-base font-mono" />
+                            <input type="text" name="build_power_start" value={inputs.build_power_start} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-orange-500/20 transition-all text-base font-mono" />
                         </div>
                         <div className="space-y-1">
                             <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('power_end')}</span>
-                            <input type="text" name="build_power_end" value={inputs.build_power_end} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-blue-500/20 transition-all text-base font-mono" />
+                            <input type="text" name="build_power_end" value={inputs.build_power_end} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-orange-500/20 transition-all text-base font-mono" />
                         </div>
                     </div>
                     <div className="mt-4 flex justify-end text-xs font-bold">
-                        <span className="text-gray-400">{t('est_score')}: <span className="text-blue-600 font-black">{formatNumber(results.build_power)}</span></span>
+                        <span className="text-gray-400">{t('est_score')}: <span className="text-orange-600 font-black">{formatNumber(results.build_power)}</span></span>
                     </div>
                 </div>
 

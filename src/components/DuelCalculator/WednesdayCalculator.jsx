@@ -317,7 +317,7 @@ const WednesdayCalculator = () => {
                     inputsKey="trade_count"
                     unit={t('unit_trade')}
                     pts={formatNumber(baseValues.trade_orange)}
-                    colorClass="bg-orange-500"
+                    colorClass="bg-sky-500"
                     value={inputs.trade_count}
                     onChange={handleInputChange}
                     score={formatNumber(results.trade)}
