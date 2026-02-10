@@ -263,7 +263,7 @@ const FridayCalculator = () => {
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <div className="p-2 rounded-lg bg-emerald-500 bg-opacity-10"><Clock size={18} className="text-emerald-500" /></div>
-                            <span className="font-bold text-gray-700 text-sm font-black text-emerald-700">Accumulate Speedup</span>
+                            <span className="font-bold text-gray-700 text-sm font-black text-emerald-700">{t('speedup_accumulate')}</span>
                         </div>
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{baseValues.speedup_1min} pts / {t('unit_min')}</span>
                     </div>
