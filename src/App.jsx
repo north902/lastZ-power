@@ -6,10 +6,12 @@ import { useLanguage } from './contexts/LanguageContext';
 import Login from './components/Auth/AuthForm';
 import PowerForm from './components/UserForm/UserForm';
 import AdminPanel from './components/AdminPanel/AdminPanel';
+import DuelCalculator from './components/DuelCalculator/DuelCalculator';
 import {
   LogOut,
   ShieldCheck,
   Layout,
+  Calculator,
   ChevronRight,
   Loader2,
   Sword,
@@ -155,37 +157,48 @@ function App() {
 
       <main className="flex-grow">
         <div className="max-w-7xl mx-auto px-4 py-8 md:py-12">
-          {isAdmin && (
-            <div className="inline-flex p-1 bg-white border border-gray-200 rounded-2xl mb-10 shadow-sm">
-              <button
-                onClick={() => setActiveTab('form')}
-                className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'form'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
-                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                  }`}
-              >
-                <Layout size={18} /> {t('personal_entry')}
-              </button>
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'admin'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
-                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                  }`}
-              >
-                <ShieldCheck size={18} /> {t('all_management')}
-              </button>
-              <button
-                onClick={() => setActiveTab('planner')}
-                className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === 'planner'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
-                  : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
-                  }`}
-              >
-                <MapIcon size={18} /> {t('view_planner')}
-              </button>
-            </div>
-          )}
+          <div className="inline-flex p-1 bg-white border border-gray-200 rounded-2xl mb-10 shadow-sm overflow-x-auto max-w-full">
+            <button
+              onClick={() => setActiveTab('form')}
+              className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'form'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+            >
+              <Layout size={18} /> {t('personal_entry')}
+            </button>
+            <button
+              onClick={() => setActiveTab('calculator')}
+              className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'calculator'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+            >
+              <Calculator size={18} /> {t('duel_calculator')}
+            </button>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'admin'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                    }`}
+                >
+                  <ShieldCheck size={18} /> {t('all_management')}
+                </button>
+                <button
+                  onClick={() => setActiveTab('planner')}
+                  className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'planner'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                    : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                    }`}
+                >
+                  <MapIcon size={18} /> {t('view_planner')}
+                </button>
+              </>
+            )}
+          </div>
 
           <div className="relative">
             {activeTab === 'admin' && isAdmin && <AdminPanel />}
@@ -195,6 +208,7 @@ function App() {
               </div>
             )}
             {activeTab === 'form' && <PowerForm user={user} />}
+            {activeTab === 'calculator' && <DuelCalculator />}
           </div>
         </div>
       </main>
