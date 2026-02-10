@@ -11,7 +11,11 @@ import {
     Gem,
     RotateCcw,
     Save,
-    Info
+    Info,
+    HelpCircle,
+    X,
+    Bell,
+    Check
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -46,15 +50,26 @@ const TuesdayCalculator = () => {
     });
 
     const [showSettings, setShowSettings] = useState(false);
+    const [showGuide, setShowGuide] = useState(false);
+    const [showWelcome, setShowWelcome] = useState(false);
+    const [dontShowAgain, setDontShowAgain] = useState(false);
 
     useEffect(() => {
+        // Load saved base values
         const saved = localStorage.getItem('duel_tue_base_values');
+        const welcomeDismissed = localStorage.getItem('duel_welcome_dismissed');
+
         if (saved) {
             try {
                 setBaseValues(JSON.parse(saved));
             } catch (e) {
                 console.error("Failed to load base values", e);
             }
+        }
+
+        // Only show welcome if it hasn't been permanently dismissed
+        if (!welcomeDismissed) {
+            setShowWelcome(true);
         }
     }, []);
 
@@ -74,6 +89,13 @@ const TuesdayCalculator = () => {
     const saveSettings = () => {
         localStorage.setItem('duel_tue_base_values', JSON.stringify(baseValues));
         setShowSettings(false);
+    };
+
+    const handleCloseWelcome = () => {
+        if (dontShowAgain) {
+            localStorage.setItem('duel_welcome_dismissed', 'true');
+        }
+        setShowWelcome(false);
     };
 
     const resetAll = () => {
@@ -147,6 +169,102 @@ const TuesdayCalculator = () => {
 
     return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            {/* Welcome Notification Modal */}
+            {showWelcome && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 border border-blue-100">
+                        <div className="p-10 text-center space-y-6">
+                            <div className="relative">
+                                <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-blue-200 animate-bounce cursor-default relative z-10">
+                                    <Bell className="text-white" size={40} />
+                                </div>
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-20 bg-blue-400 rounded-3xl blur-2xl opacity-20 animate-pulse"></div>
+                            </div>
+                            <div className="space-y-3">
+                                <h3 className="text-2xl font-black text-gray-900 leading-tight">
+                                    {t('welcome_title')}
+                                </h3>
+                                <p className="text-sm font-medium text-gray-500 leading-relaxed px-2 text-center">
+                                    {t('welcome_desc').split('{icon}')[0]}
+                                    <span className="inline-flex items-center justify-center w-5 h-5 bg-gray-100 rounded-md text-gray-900 border border-gray-200 align-middle mx-1 -mt-0.5">
+                                        <Settings size={12} />
+                                    </span>
+                                    {t('welcome_desc').split('{icon}')[1]}
+                                </p>
+                            </div>
+
+                            <div className="space-y-4">
+                                <label className="flex items-center justify-center gap-3 cursor-pointer group select-none">
+                                    <div className="relative">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only"
+                                            checked={dontShowAgain}
+                                            onChange={() => setDontShowAgain(!dontShowAgain)}
+                                        />
+                                        <div className={`w-5 h-5 rounded-md border-2 transition-all flex items-center justify-center ${dontShowAgain ? 'bg-blue-600 border-blue-600' : 'border-gray-200 group-hover:border-blue-400'}`}>
+                                            {dontShowAgain && <Check size={12} className="text-white stroke-[4]" />}
+                                        </div>
+                                    </div>
+                                    <span className="text-xs font-bold text-gray-400 group-hover:text-gray-600 transition-colors">
+                                        {t('dont_show_again')}
+                                    </span>
+                                </label>
+
+                                <button
+                                    onClick={handleCloseWelcome}
+                                    className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-sm hover:bg-black hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-gray-200"
+                                >
+                                    {t('close_guide')}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Guide Modal */}
+            {showGuide && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white rounded-[2rem] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+                        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                            <h3 className="font-black text-gray-900">{t('how_to_check')}</h3>
+                            <button onClick={() => setShowGuide(false)} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-8 overflow-y-auto max-h-[70vh]">
+                            <div className="space-y-4">
+                                <p className="text-sm font-bold text-gray-600 flex items-center gap-2">
+                                    <span className="w-5 h-5 bg-orange-500 text-white rounded-full flex items-center justify-center text-[10px]">1</span>
+                                    {t('guide_step_1')}
+                                </p>
+                                <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-lg bg-gray-50">
+                                    <img src="/lastZ-power/guide/step1.png" alt="Step 1" className="w-full h-auto" />
+                                </div>
+                            </div>
+                            <div className="space-y-4">
+                                <p className="text-sm font-bold text-gray-600 flex items-center gap-2">
+                                    <span className="w-5 h-5 bg-orange-500 text-white rounded-full flex items-center justify-center text-[10px]">2</span>
+                                    {t('guide_step_2')}
+                                </p>
+                                <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-lg bg-gray-50">
+                                    <img src="/lastZ-power/guide/step2.png" alt="Step 2" className="w-full h-auto" />
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 bg-gray-50">
+                            <button
+                                onClick={() => setShowGuide(false)}
+                                className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all shadow-xl shadow-gray-200"
+                            >
+                                {t('close_guide')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Header */}
             <div className="bg-gradient-to-br from-gray-900 to-blue-900 rounded-[2rem] p-8 text-white shadow-2xl relative overflow-hidden">
                 <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
@@ -219,7 +337,16 @@ const TuesdayCalculator = () => {
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <div className="p-2 rounded-lg bg-orange-500 bg-opacity-10"><Building2 size={18} className="text-orange-500" /></div>
-                            <span className="font-bold text-gray-700 text-sm">{t('power_increase')}</span>
+                            <div className="flex items-center gap-1">
+                                <span className="font-bold text-gray-700 text-sm">{t('power_increase')}</span>
+                                <button
+                                    onClick={() => setShowGuide(true)}
+                                    className="p-1 hover:bg-orange-100 rounded-full transition-colors group/help"
+                                    title={t('how_to_check')}
+                                >
+                                    <HelpCircle size={14} className="text-orange-400 group-hover/help:text-orange-600" />
+                                </button>
+                            </div>
                         </div>
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{baseValues.power_10} pts / 10 Power</span>
                     </div>
@@ -241,7 +368,7 @@ const TuesdayCalculator = () => {
 
                 <InputCard icon={Trophy} title={t('bounty_title')} name="bounty" inputsKey="bounty_count" unit={t('unit_count')} pts={formatNumber(baseValues.bounty_orange)} colorClass="bg-yellow-500" />
                 <InputCard icon={Hammer} title={t('refine_title')} name="refine" inputsKey="refine_count" unit={t('unit_item')} pts={formatNumber(baseValues.refine_stone)} colorClass="bg-red-500" />
-                <InputCard icon={Cpu} title={t('pulse_title')} name="pulse" inputsKey="pulse_count" unit={t('unit_item')} pts={formatNumber(baseValues.pulse_module)} colorClass="bg-purple-500" />
+                <InputCard icon={Trophy} title={t('pulse_title')} name="pulse" inputsKey="pulse_count" unit={t('unit_item')} pts={formatNumber(baseValues.pulse_module)} colorClass="bg-purple-500" />
                 <InputCard icon={Users} title={t('sur_orange')} name="sur_orange" inputsKey="sur_orange_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_orange)} colorClass="bg-orange-600" />
                 <InputCard icon={Users} title={t('sur_purple')} name="sur_purple" inputsKey="sur_purple_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_purple)} colorClass="bg-purple-400" />
                 <InputCard icon={Users} title={t('sur_blue')} name="sur_blue" inputsKey="sur_blue_count" unit={t('unit_person')} pts={formatNumber(baseValues.survivor_blue)} colorClass="bg-blue-400" />
