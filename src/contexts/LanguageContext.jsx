@@ -92,12 +92,12 @@ const translations = {
         guide_step_2: '2. 在清單中即可查看各等級對應的「戰力」',
         close_guide: '我知道了',
         welcome_title: '歡迎使用對決計算器！',
-        welcome_desc: '為了獲得 100% 準確的估分，請先點擊右上角的設定按鈕 {icon} 來確認您的基礎積分設定。系統會自動記憶您的數值！',
+        welcome_desc: '為了獲得 100% 準確的估分，請點擊右上角設定按鈕 {icon} 輸入您的「科技加成」。系統將根據加成自動計算項目積分，不再需要手動計算囉！',
         dont_show_again: '下次不再顯示',
         unit_item: '個',
         unit_person: '名',
         tips_title: '使用小撇步',
-        tips_desc: '點擊右上角的設定按鈕可以自定義您的基礎積分。系統會自動儲存您的設定。',
+        tips_desc: '現在只需設定科技加成百分比即可自動估分。如有特殊數值需求，仍可在設定中手動修改該項目的最終積分。',
         dev_in_progress: '開發中',
         calc_dev_desc: '正在根據需求建立其他天的計算邏輯...',
         monday: '週一',
@@ -259,6 +259,17 @@ const translations = {
         view_planner: 'SVS戰略規劃',
         total_member: '總成員數',
 
+        // Thursday Calculator Bonus Settings
+        tech_bonus_settings: '科技加成設定',
+        global_bonus: '全局加成 (%)',
+        recruit_bonus: '招募英雄額外加成 (%)',
+        energy_core_bonus: '能源核心額外加成 (%)',
+        advanced_manual_override: '進階：手動覆蓋最終得分',
+        unlock_manual_override: '解鎖以手動覆蓋',
+        lock_to_auto: '鎖定使用自動計算',
+        tech_bonus_guide_title: '如何查詢科技加成？',
+        tech_bonus_guide_desc: '點擊聯盟對決介面右上角的「i」圖示，即可查看各項詳細加成。',
+
     },
     en: {
         title: 'Combat Tracker',
@@ -351,12 +362,12 @@ const translations = {
         guide_step_2: '2. View the "Power" for each level in the list',
         close_guide: 'Got it',
         welcome_title: 'Welcome to Duel Calculator!',
-        welcome_desc: 'For 100% accurate scoring, please tap the settings icon {icon} in the top-right to configure your base points. We will remember these for you!',
+        welcome_desc: 'For 100% accurate scoring, tap the settings button {icon} to enter your "Tech Bonuses". The system now calculates points automatically—no more manual math!',
         dont_show_again: "Don't show this again",
         unit_item: 'pcs',
         unit_person: 'px',
         tips_title: 'Pro Tips',
-        tips_desc: 'Click the settings button in the top right to customize your base points. Settings will be saved automatically.',
+        tips_desc: 'Just set your tech bonus percentage for automatic estimation. For specific needs, you can still manually adjust final scores in settings.',
         dev_in_progress: 'Dev in progress',
         calc_dev_desc: 'Building calculation logic for other days...',
         monday: 'Mon',
@@ -518,6 +529,17 @@ const translations = {
         view_alliances: 'Alliances',
         view_planner: 'SVS Strategy',
         total_member: 'Total Members',
+
+        // Thursday Calculator Bonus Settings
+        tech_bonus_settings: 'Tech Bonus Settings',
+        global_bonus: 'All Points (%)',
+        recruit_bonus: 'Hero Recruiting-driven Points (%)',
+        energy_core_bonus: 'Power Core Usage Points (%)',
+        advanced_manual_override: 'Advanced: Manual Override Final Score',
+        unlock_manual_override: 'Unlock to manually override',
+        lock_to_auto: 'Lock to use auto-calculation',
+        tech_bonus_guide_title: 'How to find tech bonuses?',
+        tech_bonus_guide_desc: "Click the 'i' icon at the top right of the Alliance Duel interface to view detailed bonuses.",
 
     }
 };
