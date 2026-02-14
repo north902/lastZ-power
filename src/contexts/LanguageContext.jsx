@@ -270,6 +270,25 @@ const translations = {
         tech_bonus_guide_title: '如何查詢科技加成？',
         tech_bonus_guide_desc: '點擊聯盟對決介面右上角的「i」圖示，即可查看各項詳細加成。',
 
+        // Friday Calculator
+        speedup_1min: '任意加速 (1分鐘)',
+        build_power_10: '建築戰力提升 (每10點)',
+        tech_power_10: '科技戰力提升 (每10點)',
+        radar_1: '雷達任務 (1個)',
+        building_bonus: '建築戰力相關積分加成 (%)',
+        tech_power_bonus: '科技戰力相關積分加成 (%)',
+        training_bonus: '訓練相關積分加成 (%)',
+        soldier_t1: 'T1 士兵',
+        soldier_t2: 'T2 士兵',
+        soldier_t3: 'T3 士兵',
+        soldier_t4: 'T4 士兵',
+        soldier_t5: 'T5 士兵',
+        soldier_t6: 'T6 士兵',
+        soldier_t7: 'T7 士兵',
+        soldier_t8: 'T8 士兵',
+        soldier_t9: 'T9 士兵',
+        soldier_t10: 'T10 士兵',
+
     },
     en: {
         title: 'Combat Tracker',
@@ -540,6 +559,25 @@ const translations = {
         lock_to_auto: 'Lock to use auto-calculation',
         tech_bonus_guide_title: 'How to find tech bonuses?',
         tech_bonus_guide_desc: "Click the 'i' icon at the top right of the Alliance Duel interface to view detailed bonuses.",
+
+        // Friday Calculator
+        speedup_1min: 'Any Speedup (1 min)',
+        build_power_10: 'Building Power Increase (per 10)',
+        tech_power_10: 'Tech Power Increase (per 10)',
+        radar_1: 'Radar Task (1 task)',
+        building_bonus: 'Building Construction Points (%)',
+        tech_power_bonus: 'Tech Research Points (%)',
+        training_bonus: 'Soldier Training Points (%)',
+        soldier_t1: 'T1 Soldier',
+        soldier_t2: 'T2 Soldier',
+        soldier_t3: 'T3 Soldier',
+        soldier_t4: 'T4 Soldier',
+        soldier_t5: 'T5 Soldier',
+        soldier_t6: 'T6 Soldier',
+        soldier_t7: 'T7 Soldier',
+        soldier_t8: 'T8 Soldier',
+        soldier_t9: 'T9 Soldier',
+        soldier_t10: 'T10 Soldier',
 
     }
 };
