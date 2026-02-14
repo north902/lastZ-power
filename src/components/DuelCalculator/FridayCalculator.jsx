@@ -18,7 +18,8 @@ import {
     Unlock,
     ChevronRight,
     X,
-    ChevronDown
+    ChevronDown,
+    Zap
 } from 'lucide-react';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -97,8 +98,15 @@ const FridayCalculator = () => {
         tech_power_end: '',
         radar_count: '',
         soldier_count: '',
-        selected_tier: '8', // Default to T8
-        diamond_count: ''
+        selected_tier: '9',
+        diamond_count: '',
+        // 秒產訓練
+        instant_tier: '9',
+        instant_batch_size: '',
+        instant_batch_h: '',
+        instant_batch_m: '',
+        instant_batch_s: '',
+        instant_batch_count: ''
     });
 
     const [showSettings, setShowSettings] = useState(false);
@@ -192,8 +200,11 @@ const FridayCalculator = () => {
             speedup_d: '', speedup_h: '', speedup_m: '',
             build_power_start: '', build_power_end: '',
             tech_power_start: '', tech_power_end: '',
-            radar_count: '', soldier_count: '', selected_tier: '8',
-            diamond_count: ''
+            radar_count: '', soldier_count: '', selected_tier: '9',
+            diamond_count: '',
+            instant_tier: '9',
+            instant_batch_size: '', instant_batch_h: '', instant_batch_m: '', instant_batch_s: '',
+            instant_batch_count: ''
         });
     };
 
@@ -228,6 +239,17 @@ const FridayCalculator = () => {
         const buildPowerDiff = Math.max(0, (Number(inputs.build_power_end) || 0) - (Number(inputs.build_power_start) || 0));
         const techPowerDiff = Math.max(0, (Number(inputs.tech_power_end) || 0) - (Number(inputs.tech_power_start) || 0));
 
+        // 秒產訓練計算
+        const instantBatchSize = Number(inputs.instant_batch_size) || 0;
+        const instantBatchCount = Number(inputs.instant_batch_count) || 0;
+        const instantTotalSoldiers = instantBatchSize * instantBatchCount;
+        // 每批耗時（秒），無條件進位至分鐘
+        const instantBatchTotalSeconds = ((Number(inputs.instant_batch_h) || 0) * 3600) +
+            ((Number(inputs.instant_batch_m) || 0) * 60) +
+            (Number(inputs.instant_batch_s) || 0);
+        const instantBatchMinutes = instantBatchTotalSeconds > 0 ? Math.ceil(instantBatchTotalSeconds / 60) : 0;
+        const instantTotalSpeedupMinutes = instantBatchMinutes * instantBatchCount;
+
         return {
             speedup: totalSpeedupMinutes * getScore('speedup_1min'),
             build_power: (buildPowerDiff / 10) * getScore('build_power_10'),
@@ -235,14 +257,23 @@ const FridayCalculator = () => {
             radar: (Number(inputs.radar_count) || 0) * getScore('radar_1'),
             soldier: (Number(inputs.soldier_count) || 0) * getScore(`soldier_t${inputs.selected_tier}`),
             diamond: (Number(inputs.diamond_count) || 0) * getScore('diamond_1'),
+            // 秒產
+            instant_soldier: instantTotalSoldiers * getScore(`soldier_t${inputs.instant_tier}`),
+            instant_speedup: instantTotalSpeedupMinutes * getScore('speedup_1min'),
+            // 顯示用資料
             totalSpeedupMinutes,
             buildPowerDiff,
-            techPowerDiff
+            techPowerDiff,
+            instantTotalSoldiers,
+            instantTotalSpeedupMinutes,
+            instantBatchMinutes
         };
     }, [inputs, bonusSettings, manualOverrides]);
 
     const totalScore = useMemo(() => {
-        return Object.values(results).reduce((acc, curr) => typeof curr === 'number' ? acc + curr : acc, 0);
+        return results.speedup + results.build_power + results.tech_power +
+            results.radar + results.soldier + results.diamond +
+            results.instant_soldier + results.instant_speedup;
     }, [results]);
 
     const formatNumber = (num) => {
@@ -518,12 +549,12 @@ const FridayCalculator = () => {
                     </div>
                 </div>
 
-                {/* Training Soldier */}
+                {/* Normal Training Soldier */}
                 <div className="bg-white rounded-2xl p-4 shadow-sm border border-orange-100 border-l-4 border-l-orange-500 hover:shadow-md transition-all md:col-span-2 lg:col-span-1">
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <div className="p-2 rounded-lg bg-orange-500 bg-opacity-10"><Users size={18} className="text-orange-500" /></div>
-                            <span className="font-bold text-gray-700 text-sm">{t('soldier_title')}</span>
+                            <span className="font-bold text-gray-700 text-sm">{t('normal_training')}</span>
                         </div>
                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
                             {formatNumber(manualOverrides[`soldier_t${inputs.selected_tier}`] !== undefined ? manualOverrides[`soldier_t${inputs.selected_tier}`] : getFinalScore(`soldier_t${inputs.selected_tier}`))} pts / {t('unit_soldier')}
@@ -563,6 +594,106 @@ const FridayCalculator = () => {
 
                 <InputCard icon={Radio} title={t('radar_title')} name="radar" inputsKey="radar_count" unit={t('unit_radar')} finalScore={formatNumber(manualOverrides.radar_1 !== undefined ? manualOverrides.radar_1 : getFinalScore('radar_1'))} colorClass="bg-blue-600" value={inputs.radar_count} onChange={handleInputChange} score={formatNumber(results.radar)} t={t} />
                 <InputCard icon={Gem} title={t('diamond_gift')} name="diamond" inputsKey="diamond_count" unit={t('unit_item')} finalScore={BASE_SCORES.diamond_1} colorClass="bg-cyan-500" value={inputs.diamond_count} onChange={handleInputChange} score={formatNumber(results.diamond)} t={t} />
+            </div>
+
+            {/* Instant Training Section */}
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-amber-200 border-l-4 border-l-amber-500 hover:shadow-md transition-all">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                        <div className="p-2 rounded-lg bg-amber-500 bg-opacity-10"><Zap size={18} className="text-amber-500" /></div>
+                        <div>
+                            <span className="font-black text-gray-800 text-sm">{t('instant_training')}</span>
+                            <p className="text-[10px] text-gray-400 font-medium">{t('instant_training_desc')}</p>
+                        </div>
+                    </div>
+                    <div className="px-2 py-1 bg-amber-50 rounded-lg border border-amber-200">
+                        <span className="text-[10px] font-black text-amber-600 uppercase tracking-wider">{t('soldier_title')} + {t('speedup_accumulate')}</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Left: Inputs */}
+                    <div className="space-y-3">
+                        {/* Tier Selector */}
+                        <div className="relative">
+                            <span className="text-[9px] font-black text-gray-400 uppercase ml-1 mb-1 block">{t('select_tier')}</span>
+                            <select
+                                value={inputs.instant_tier}
+                                onChange={(e) => setInputs(prev => ({ ...prev, instant_tier: e.target.value }))}
+                                className="w-full appearance-none bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold focus:ring-2 focus:ring-amber-500/20 transition-all text-sm cursor-pointer"
+                            >
+                                {tiers.map(t_num => (
+                                    <option key={t_num} value={t_num}>T{t_num} {t('soldiers')}</option>
+                                ))}
+                            </select>
+                            <ChevronDown className="absolute right-4 bottom-3 text-gray-400 pointer-events-none" size={16} />
+                        </div>
+
+                        {/* Batch Size & Count */}
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                                <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('per_batch_soldiers')}</span>
+                                <input type="text" name="instant_batch_size" value={inputs.instant_batch_size} onChange={handleInputChange} placeholder="170" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono text-base" />
+                            </div>
+                            <div className="space-y-1">
+                                <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('batch_count')}</span>
+                                <input type="text" name="instant_batch_count" value={inputs.instant_batch_count} onChange={handleInputChange} placeholder="10" className="w-full bg-gray-50 border-none rounded-xl py-3 px-4 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-amber-500/20 transition-all font-mono text-base" />
+                            </div>
+                        </div>
+
+                        {/* Time Per Batch */}
+                        <div>
+                            <span className="text-[9px] font-black text-gray-400 uppercase ml-1 mb-1 block">{t('per_batch_time')}</span>
+                            <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                    <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('unit_hour')}</span>
+                                    <input type="text" name="instant_batch_h" value={inputs.instant_batch_h} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-3 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-amber-500/20 transition-all text-base font-mono" />
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('unit_min')}</span>
+                                    <input type="text" name="instant_batch_m" value={inputs.instant_batch_m} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-3 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-amber-500/20 transition-all text-base font-mono" />
+                                </div>
+                                <div className="space-y-1">
+                                    <span className="text-[9px] font-black text-gray-400 uppercase ml-1">{t('unit_sec')}</span>
+                                    <input type="text" name="instant_batch_s" value={inputs.instant_batch_s} onChange={handleInputChange} placeholder="0" className="w-full bg-gray-50 border-none rounded-xl py-3 px-3 text-gray-900 font-bold placeholder:text-gray-300 focus:ring-2 focus:ring-amber-500/20 transition-all text-base font-mono" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right: Summary */}
+                    <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl p-4 border border-amber-100 flex flex-col justify-center space-y-3">
+                        <div className="text-[9px] font-black text-amber-600 uppercase tracking-widest">{t('instant_summary')}</div>
+                        <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-gray-500 font-medium">🏋️ {t('total_soldiers')}</span>
+                                <span className="text-sm font-black text-gray-800">{formatNumber(results.instantTotalSoldiers)} {t('unit_soldier')}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-gray-500 font-medium">⏱️ {t('per_batch_speedup')}</span>
+                                <span className="text-sm font-black text-gray-800">{formatNumber(results.instantBatchMinutes)} {t('unit_min')}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-gray-500 font-medium">⚡ {t('total_speedup')}</span>
+                                <span className="text-sm font-black text-gray-800">{formatNumber(results.instantTotalSpeedupMinutes)} {t('unit_min')}</span>
+                            </div>
+                        </div>
+                        <div className="border-t border-amber-200 pt-3 space-y-1">
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-amber-700 font-bold">{t('soldier_score')}</span>
+                                <span className="text-sm font-black text-amber-700">{formatNumber(results.instant_soldier)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-xs text-emerald-700 font-bold">{t('speedup_score')}</span>
+                                <span className="text-sm font-black text-emerald-700">{formatNumber(results.instant_speedup)}</span>
+                            </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-amber-200">
+                                <span className="text-xs text-gray-900 font-black">{t('subtotal')}</span>
+                                <span className="text-base font-black text-gray-900">{formatNumber(results.instant_soldier + results.instant_speedup)}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div className="bg-green-50/50 rounded-2xl p-6 border border-green-100 flex gap-4">

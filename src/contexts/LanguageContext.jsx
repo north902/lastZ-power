@@ -289,6 +289,23 @@ const translations = {
         soldier_t9: 'T9 士兵',
         soldier_t10: 'T10 士兵',
 
+        // Friday Instant Training
+        normal_training: '正常訓練',
+        instant_training: '秒產訓練',
+        instant_training_desc: '計算秒產士兵的積分，同時包含士兵和加速積分',
+        select_tier: '選擇階級',
+        per_batch_soldiers: '每批士兵數',
+        batch_count: '批次數量',
+        per_batch_time: '每批訓練時間',
+        unit_sec: '秒',
+        instant_summary: '秒產統計',
+        total_soldiers: '總士兵數',
+        per_batch_speedup: '每批加速 (進位)',
+        total_speedup: '總加速時間',
+        soldier_score: '士兵積分',
+        speedup_score: '加速積分',
+        subtotal: '小計',
+
     },
     en: {
         title: 'Combat Tracker',
@@ -578,6 +595,23 @@ const translations = {
         soldier_t8: 'T8 Soldier',
         soldier_t9: 'T9 Soldier',
         soldier_t10: 'T10 Soldier',
+
+        // Friday Instant Training
+        normal_training: 'Normal Training',
+        instant_training: 'Instant Training',
+        instant_training_desc: 'Calculate instant training score including soldiers + speedups',
+        select_tier: 'Select Tier',
+        per_batch_soldiers: 'Soldiers Per Batch',
+        batch_count: 'Number of Batches',
+        per_batch_time: 'Time Per Batch',
+        unit_sec: 'Sec',
+        instant_summary: 'Instant Training Summary',
+        total_soldiers: 'Total Soldiers',
+        per_batch_speedup: 'Per Batch Speedup (Rounded Up)',
+        total_speedup: 'Total Speedup',
+        soldier_score: 'Soldier Score',
+        speedup_score: 'Speedup Score',
+        subtotal: 'Subtotal',
 
     }
 };
