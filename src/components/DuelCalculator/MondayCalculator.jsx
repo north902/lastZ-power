@@ -28,8 +28,8 @@ import { useLanguage } from '../../contexts/LanguageContext';
 const MultiInputCard = ({ icon: Icon, title, items, colorClass, t, lang, subtotal, gridCols = 'lg:grid-cols-7', colSpan = 'lg:col-span-3' }) => (
     <div className={`bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 hover:shadow-md transition-all md:col-span-2 ${colSpan}`}>
         <div className="flex items-center gap-3 mb-6">
-            <div className={`p-3 rounded-2xl ${colorClass} bg-opacity-10 shadow-sm`}>
-                <Icon size={24} className={colorClass.replace('bg-', 'text-')} />
+            <div className={`p-2.5 rounded-2xl ${colorClass} bg-opacity-10 shadow-sm`}>
+                <Icon size={20} className={colorClass.replace('bg-', 'text-')} />
             </div>
             <h3 className="font-black text-gray-900 leading-tight">{title}</h3>
         </div>
@@ -70,13 +70,13 @@ const MultiInputCard = ({ icon: Icon, title, items, colorClass, t, lang, subtota
 const InputCard = ({ icon: Icon, title, name, inputsKey, unit, inputUnit, finalScore, colorClass, value, onChange, score, t, lang }) => (
     <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-all group">
         <div className="flex items-center justify-between gap-1 mb-3">
-            <div className="flex items-center gap-1 min-w-0">
-                <div className={`p-1.5 rounded-lg ${colorClass} bg-opacity-10 flex-shrink-0`}>
-                    <Icon size={16} className={colorClass.replace('bg-', 'text-')} />
+            <div className="flex items-center gap-2 min-w-0">
+                <div className={`p-2.5 rounded-2xl ${colorClass} bg-opacity-10 flex-shrink-0`}>
+                    <Icon size={20} className={colorClass.replace('bg-', 'text-')} />
                 </div>
-                <span className="font-bold text-gray-700 text-sm whitespace-nowrap">{title}</span>
+                <span className="font-black text-gray-900 text-sm whitespace-nowrap">{title}</span>
             </div>
-            <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-1.5 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
+            <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-2 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
                 {finalScore} PTS / {unit}
             </span>
         </div>
@@ -553,11 +553,11 @@ const MondayCalculator = () => {
                 {/* Snow Leopard (SL) */}
                 <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all">
                     <div className="flex items-center justify-between gap-1 mb-4">
-                        <div className="flex items-center gap-1 min-w-0">
-                            <div className="p-1.5 rounded-lg bg-slate-800 bg-opacity-10 shadow-sm flex-shrink-0"><Target size={16} className="text-slate-800" /></div>
-                            <span className="font-black text-gray-700 text-sm whitespace-nowrap">{t('snow_leopard')}</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <div className="p-2.5 rounded-2xl bg-slate-800 bg-opacity-10 shadow-sm flex-shrink-0"><Target size={20} className="text-slate-800" /></div>
+                            <span className="font-black text-gray-900 text-sm whitespace-nowrap">{t('snow_leopard')}</span>
                         </div>
-                        <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-1.5 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
+                        <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-2 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
                             {formatNumber(manualOverrides[`sl_${inputs.sl_level}`] !== undefined ? manualOverrides[`sl_${inputs.sl_level}`] : getFinalScore(`sl_${inputs.sl_level}`))} PTS / {t('unit_monster')}
                         </span>
                     </div>
@@ -587,11 +587,11 @@ const MondayCalculator = () => {
                 {/* Polar Zombie (PZ) */}
                 <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 hover:shadow-md transition-all">
                     <div className="flex items-center justify-between gap-1 mb-4">
-                        <div className="flex items-center gap-1 min-w-0">
-                            <div className="p-1.5 rounded-lg bg-blue-800 bg-opacity-10 shadow-sm flex-shrink-0"><Skull size={16} className="text-blue-800" /></div>
-                            <span className="font-black text-gray-700 text-sm whitespace-nowrap">{t('polar_zombie')}</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                            <div className="p-2.5 rounded-2xl bg-blue-800 bg-opacity-10 shadow-sm flex-shrink-0"><Skull size={20} className="text-blue-800" /></div>
+                            <span className="font-black text-gray-900 text-sm whitespace-nowrap">{t('polar_zombie')}</span>
                         </div>
-                        <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-1.5 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
+                        <span className={`${lang === 'en' ? 'text-[8.5px] tracking-tight' : 'text-[9px] bg-gray-50 px-2 border border-gray-100'} font-black text-gray-400 uppercase rounded-full whitespace-nowrap flex-shrink-0`}>
                             {formatNumber(manualOverrides[`pz_${inputs.pz_level}`] !== undefined ? manualOverrides[`pz_${inputs.pz_level}`] : getFinalScore(`pz_${inputs.pz_level}`))} PTS / {t('unit_monster')}
                         </span>
                     </div>
@@ -624,7 +624,7 @@ const MondayCalculator = () => {
                         <Coins size={80} className="text-green-900" />
                     </div>
                     <div className="flex items-center gap-2 mb-4">
-                        <div className="p-2.5 rounded-xl bg-green-500 bg-opacity-10 shadow-sm"><Coins size={20} className="text-green-500" /></div>
+                        <div className="p-2.5 rounded-2xl bg-green-500 bg-opacity-10 shadow-sm"><Coins size={20} className="text-green-500" /></div>
                         <span className="font-black text-gray-900 leading-tight">{t('gathering_title')}</span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
