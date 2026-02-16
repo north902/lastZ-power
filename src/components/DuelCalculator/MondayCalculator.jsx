@@ -38,8 +38,8 @@ const MultiInputCard = ({ icon: Icon, title, items, colorClass, t, lang, subtota
             {items.map((item) => (
                 <div key={item.key} className="space-y-1.5">
                     <div className="flex justify-between items-end px-1 gap-1">
-                        <span className="text-[10px] font-black text-gray-900 uppercase tracking-tighter leading-none">{item.label}</span>
-                        <span className={`${lang === 'en' ? 'text-[8px] tracking-tighter' : 'text-[10px]'} font-bold text-gray-400 whitespace-nowrap uppercase leading-none pb-[1px]`}>
+                        <span className="text-[11px] font-black text-gray-900 uppercase tracking-tighter leading-none">{item.label}</span>
+                        <span className="text-[10px] font-bold text-gray-400 whitespace-nowrap uppercase tracking-tighter leading-none pb-[1px]">
                             {item.pts} PTS / {item.unit}
                         </span>
                     </div>
