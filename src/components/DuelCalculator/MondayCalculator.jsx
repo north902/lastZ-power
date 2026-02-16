@@ -328,13 +328,13 @@ const MondayCalculator = () => {
             {/* Welcome Modal */}
             {showWelcome && createPortal(
                 <div className="fixed inset-0 z-[999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 border border-slate-100">
+                    <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 border border-cyan-100">
                         <div className="p-10 text-center space-y-6">
                             <div className="relative">
-                                <div className="w-20 h-20 bg-slate-800 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-slate-200 animate-bounce cursor-default relative z-10">
+                                <div className="w-20 h-20 bg-cyan-600 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-cyan-200 animate-bounce cursor-default relative z-10">
                                     <Bell className="text-white" size={40} />
                                 </div>
-                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-20 bg-slate-400 rounded-3xl blur-2xl opacity-20 animate-pulse"></div>
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-20 h-20 bg-cyan-400 rounded-3xl blur-2xl opacity-20 animate-pulse"></div>
                             </div>
                             <div className="space-y-3">
                                 <h3 className="text-2xl font-black text-gray-900 leading-tight">{t('welcome_title')}</h3>
@@ -350,13 +350,15 @@ const MondayCalculator = () => {
                                 <label className="flex items-center justify-center gap-3 cursor-pointer group select-none">
                                     <div className="relative">
                                         <input type="checkbox" className="sr-only" checked={dontShowAgain} onChange={() => setDontShowAgain(!dontShowAgain)} />
-                                        <div className={`w-5 h-5 rounded-md border-2 transition-all flex items-center justify-center ${dontShowAgain ? 'bg-slate-800 border-slate-800' : 'border-gray-200 group-hover:border-slate-400'}`}>
+                                        <div className={`w-5 h-5 rounded-md border-2 transition-all flex items-center justify-center ${dontShowAgain ? 'bg-cyan-600 border-cyan-600' : 'border-gray-200 group-hover:border-cyan-400'}`}>
                                             {dontShowAgain && <Check size={12} className="text-white stroke-[4]" />}
                                         </div>
                                     </div>
                                     <span className="text-xs font-bold text-gray-400 group-hover:text-gray-600 transition-colors">{t('dont_show_again')}</span>
                                 </label>
-                                <button onClick={handleCloseWelcome} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all shadow-xl shadow-gray-200">{t('close_guide')}</button>
+                                <button onClick={handleCloseWelcome} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-sm hover:bg-black hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-gray-200">
+                                    {t('close_guide')}
+                                </button>
                             </div>
                         </div>
                     </div>
