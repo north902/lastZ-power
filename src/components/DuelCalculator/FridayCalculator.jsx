@@ -496,7 +496,7 @@ const FridayCalculator = () => {
                         ))}
                     </div>
                     <div className="mt-4 flex justify-between items-center text-xs font-bold">
-                        <span className="text-gray-400 px-1">{t('current_total')}: <span className="text-emerald-600">{formatNumber(results.totalSpeedupMinutes)} {t('unit_min')}</span></span>
+                        <span className="text-gray-400 px-1">{t('total_minutes')}: <span className="text-emerald-600">{formatNumber(results.totalSpeedupMinutes)} {t('unit_min')}</span></span>
                         <span className="text-gray-400">{t('est_score')}: <span className="text-emerald-600 font-black">{formatNumber(results.speedup)}</span></span>
                     </div>
                 </div>
@@ -508,7 +508,9 @@ const FridayCalculator = () => {
                             <div className="p-2 rounded-lg bg-orange-500 bg-opacity-10"><Building2 size={18} className="text-orange-500" /></div>
                             <span className="font-bold text-gray-700 text-sm">{t('power_increase')}</span>
                         </div>
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{formatNumber(manualOverrides.build_power_10 !== undefined ? manualOverrides.build_power_10 : getFinalScore('build_power_10'))} pts / 10 Power</span>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                            {formatNumber(manualOverrides.build_power_10 !== undefined ? manualOverrides.build_power_10 : getFinalScore('build_power_10'))} PTS / {t('unit_per_10_power')}
+                        </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
@@ -532,7 +534,9 @@ const FridayCalculator = () => {
                             <div className="p-2 rounded-lg bg-purple-500 bg-opacity-10"><FlaskConical size={18} className="text-purple-500" /></div>
                             <span className="font-bold text-gray-700 text-sm">{t('tech_power_increase')}</span>
                         </div>
-                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">{formatNumber(manualOverrides.tech_power_10 !== undefined ? manualOverrides.tech_power_10 : getFinalScore('tech_power_10'))} pts / 10 Power</span>
+                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                            {formatNumber(manualOverrides.tech_power_10 !== undefined ? manualOverrides.tech_power_10 : getFinalScore('tech_power_10'))} PTS / {t('unit_per_10_power')}
+                        </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">

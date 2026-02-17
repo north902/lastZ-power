@@ -238,7 +238,7 @@ const SaturdayCalculator = () => {
                         ))}
                     </div>
                     <div className="mt-4 flex justify-between items-center text-xs font-bold">
-                        <span className="text-gray-400 px-1">{t('current_total')}: <span className="text-red-600">{formatNumber(results.totalSpeedupMinutes)} {t('unit_min')}</span></span>
+                        <span className="text-gray-400 px-1">{t('total_minutes')}: <span className="text-red-600">{formatNumber(results.totalSpeedupMinutes)} {t('unit_min')}</span></span>
                         <span className="text-gray-400">{t('est_score')}: <span className="text-red-600 font-black">{formatNumber(results.speedup)}</span></span>
                     </div>
                 </div>

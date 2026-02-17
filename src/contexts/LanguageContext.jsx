@@ -98,6 +98,7 @@ const translations = {
         unit_person: '名',
         tips_title: '使用小撇步',
         tips_desc: '現在只需設定科技加成百分比即可自動估分。如有特殊數值需求，仍可在設定中手動修改該項目的最終積分。',
+        unit_per_10_power: '10戰力',
         dev_in_progress: '開發中',
         calc_dev_desc: '正在根據需求建立其他天的計算邏輯...',
         monday: '週一',
@@ -272,11 +273,14 @@ const translations = {
         global_bonus: '全局加成 (%)',
         recruit_bonus: '招募英雄額外加成 (%)',
         energy_core_bonus: '能源核心額外加成 (%)',
+        building_power_bonus: '建築戰力積分額外加成 (%)',
         advanced_manual_override: '進階：手動覆蓋最終得分',
         unlock_manual_override: '解鎖以手動覆蓋',
         lock_to_auto: '鎖定使用自動計算',
         tech_bonus_guide_title: '如何查詢科技加成？',
         tech_bonus_guide_desc: '點擊聯盟對決介面右上角的「i」圖示，即可查看各項詳細加成。',
+        total_minutes: '累計時長',
+        total_points: '當前累計總分',
 
         // Friday Calculator
         speedup_1min: '任意加速 (1分鐘)',
@@ -412,6 +416,7 @@ const translations = {
         unit_person: 'px',
         tips_title: 'Pro Tips',
         tips_desc: 'Just set your tech bonus percentage for automatic estimation. For specific needs, you can still manually adjust final scores in settings.',
+        unit_per_10_power: '10 Power',
         dev_in_progress: 'Dev in progress',
         calc_dev_desc: 'Building calculation logic for other days...',
         monday: 'Mon',
@@ -587,11 +592,14 @@ const translations = {
         global_bonus: 'All Points (%)',
         recruit_bonus: 'Hero Recruiting-driven Points (%)',
         energy_core_bonus: 'Power Core Usage Points (%)',
+        building_power_bonus: 'Structure Power Points (%)',
         advanced_manual_override: 'Advanced: Manual Override Final Score',
         unlock_manual_override: 'Unlock to manually override',
         lock_to_auto: 'Lock to use auto-calculation',
         tech_bonus_guide_title: 'How to find tech bonuses?',
         tech_bonus_guide_desc: "Click the 'i' icon at the top right of the Alliance Duel interface to view detailed bonuses.",
+        total_minutes: 'Total Duration',
+        total_points: 'Current Total Score',
 
         // Friday Calculator
         speedup_1min: 'Any Speedup (1 min)',
@@ -601,16 +609,7 @@ const translations = {
         building_bonus: 'Building Construction Points (%)',
         tech_power_bonus: 'Tech Research Points (%)',
         training_bonus: 'Soldier Training Points (%)',
-        soldier_t1: 'T1 Soldier',
-        soldier_t2: 'T2 Soldier',
-        soldier_t3: 'T3 Soldier',
-        soldier_t4: 'T4 Soldier',
-        soldier_t5: 'T5 Soldier',
-        soldier_t6: 'T6 Soldier',
-        soldier_t7: 'T7 Soldier',
-        soldier_t8: 'T8 Soldier',
-        soldier_t9: 'T9 Soldier',
-        soldier_t10: 'T10 Soldier',
+
 
         // Friday Instant Training
         normal_training: 'Normal Training',
