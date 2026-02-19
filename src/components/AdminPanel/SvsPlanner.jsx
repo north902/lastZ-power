@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     MousePointer2, Trash2, Download, ZoomIn, ZoomOut, Maximize,
-    Map as MapIcon, Sword, Home, Navigation, Fish, Hand, Pen,
+    Map as MapIcon, Sword, Home, Navigation, Fish, Hand, Pen, Type,
     Undo2, Redo2, Save, Upload, Share2, Copy, X, Clock
 } from 'lucide-react';
 import { db } from '../../config/firebase';
@@ -160,15 +160,28 @@ function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex) {
                 ctx.fillText(`${q},${r}`, cx, cy);
             }
             if (cell?.label) {
-                ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = 'white';
-                ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 4;
-                ctx.fillText(cell.label, cx, cy); ctx.shadowBlur = 0;
+                const fontSize = cell.type === 'text' ? 12 : 14;
+                ctx.font = `bold ${fontSize}px sans-serif`; ctx.fillStyle = 'white';
+                ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
+                // HQ label
+                const labelY = cy + HEX_R * 0.8;
+                ctx.fillText(cell.label, cx, labelY); ctx.shadowBlur = 0;
             }
             if (cell?.isCenter && cell.type === 'hq') { ctx.font = '14px serif'; ctx.fillText('🏠', cx, cy); }
             if (cell?.isCenter && cell.type === 'cannon') { ctx.font = '14px serif'; ctx.fillText('⚔️', cx, cy); }
             if (mode === 'fishpond' && q === 0 && r === 0 && !cell) { ctx.font = '20px serif'; ctx.fillText('🐉', cx, cy); }
         }
     }
+    // Render floating text
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+    for (const key of Object.keys(cs)) {
+        if (!key.startsWith('text_')) continue;
+        const cell = cs[key];
+        ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = cell.color || 'white';
+        ctx.fillText(cell.label, cell.x, cell.y);
+    }
+    ctx.shadowBlur = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -201,6 +214,8 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const hoveredHex = useRef(null);
     const rafId = useRef(null);
     const dprRef = useRef(1);
+    const draggingText = useRef(null);
+    const [textInput, setTextInput] = useState({ visible: false, x: 0, y: 0, val: '' });
 
     // History
     const historyRef = useRef([{}]);
@@ -457,30 +472,90 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     };
     const handleMouseDown = (e) => {
         dragStart.current = { x: e.clientX, y: e.clientY };
+        const [wx, wy] = getWorldPos(e);
+
+        // Check for text hit if tool is hand
+        if (toolRef.current === 'hand' && e.button === 0) {
+            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            if (hitText) {
+                draggingText.current = { id: hitText, startX: wx, startY: wy, initialX: cellsRef.current[hitText].x, initialY: cellsRef.current[hitText].y };
+                e.preventDefault();
+                return;
+            }
+        }
+
         if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
             isDragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
         }
     };
     const handleMouseMove = (e) => {
+        const [wx, wy] = getWorldPos(e);
+
+        // Text dragging
+        if (draggingText.current) {
+            const dx = wx - draggingText.current.startX;
+            const dy = wy - draggingText.current.startY;
+            setCells(prev => ({
+                ...prev,
+                [draggingText.current.id]: {
+                    ...prev[draggingText.current.id],
+                    x: draggingText.current.initialX + dx,
+                    y: draggingText.current.initialY + dy
+                }
+            }));
+            return;
+        }
+
         if (isDragging.current) {
             const dx = e.clientX - lastPos.current.x, dy = e.clientY - lastPos.current.y;
             lastPos.current = { x: e.clientX, y: e.clientY };
             offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
             requestDraw(); return;
         }
-        const [wx, wy] = getWorldPos(e);
+
+        // Hover effects
+        if (toolRef.current === 'hand') {
+            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            document.body.style.cursor = hitText ? 'move' : 'default';
+        }
+
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
         if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
     };
     const handleMouseUp = (e) => {
+        if (draggingText.current) { draggingText.current = null; return; }
         if (isDragging.current) { isDragging.current = false; return; }
+    };
+    const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
         if (Math.sqrt(dx * dx + dy * dy) > 4) return;
         if (e.button !== 0 || toolRef.current === 'hand') return;
         const [wx, wy] = getWorldPos(e);
         const [q, r] = px2hex(wx, wy);
         applyTool(q, r, wx, wy);
+    };
+    const handleDoubleClick = (e) => {
+        e.preventDefault();
+        const [wx, wy] = getWorldPos(e);
+        const [q, r] = px2hex(wx, wy);
+        const key = `${q},${r}`;
+        const cell = cellsRef.current[key];
+        // Only allow renaming HQ center cells
+        if (cell?.isCenter && cell.type === 'hq') {
+            const name = prompt('輸入總部名稱（留空清除）', cell.label || '');
+            if (name === null) return; // cancelled
+            setCells(prev => {
+                const nc = { ...prev };
+                if (name.trim()) {
+                    nc[key] = { ...nc[key], label: name.trim() };
+                } else {
+                    const { label, ...rest } = nc[key];
+                    nc[key] = rest;
+                }
+                return nc;
+            });
+        }
     };
     const applyTool = (q, r, wx, wy) => {
         const t = toolRef.current, c = colorRef.current, mode = mapModeRef.current;
@@ -505,10 +580,18 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                     nc[key] = { type: 'border', edges: [edgeIdx], color: c };
                 }
             }
+            else if (t === 'text') {
+                setTextInput({ visible: true, x: wx, y: wy, val: '', color: c });
+            }
             else if (t === 'eraser') {
-                const tgt = nc[key];
-                if (tgt?.parent) { Object.keys(nc).forEach(k => { if (nc[k].parent === tgt.parent) delete nc[k]; }); }
-                else delete nc[key];
+                // Earle floating text first
+                const textKey = Object.keys(nc).find(k => k.startsWith('text_') && Math.hypot(nc[k].x - wx, nc[k].y - wy) < 15);
+                if (textKey) delete nc[textKey];
+                else {
+                    const tgt = nc[key];
+                    if (tgt?.parent) { Object.keys(nc).forEach(k => { if (nc[k].parent === tgt.parent) delete nc[k]; }); }
+                    else delete nc[key];
+                }
             } else if (t === 'hq' || t === 'cannon') {
                 const shape = t === 'hq' ? HQ_SHAPE : CANNON_SHAPE;
                 const blocked = shape.some(([oq, or]) => {
@@ -525,7 +608,12 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         });
     };
 
-    const cursorClass = tool === 'hand' ? 'cursor-grab active:cursor-grabbing' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
+
+
+    // Reset cursor when tool changes
+    useEffect(() => { document.body.style.cursor = 'default'; }, [tool]);
+
+    const cursorClass = tool === 'hand' ? '' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
 
     return (
         <div className="flex flex-col h-[calc(100vh-200px)] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
@@ -543,6 +631,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={16} />} label="總部" />
                         {mapMode === 'svs' && <ToolBtn active={tool === 'cannon'} onClick={() => setTool('cannon')} icon={<Sword size={16} />} label="哨塔" />}
                         <ToolBtn active={tool === 'border'} onClick={() => setTool('border')} icon={<Pen size={16} />} label="邊界" />
+                        <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={16} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={16} />} label="橡皮擦" />
                     </div>
                     <div className="h-6 w-px bg-slate-700" />
@@ -595,8 +684,37 @@ export const SvsPlanner = ({ isAdmin = false }) => {
             <div ref={containerRef} className="flex-1 relative overflow-hidden">
                 <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                     onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
+                    onClick={handleClick} onDoubleClick={handleDoubleClick}
                     onMouseLeave={() => { isDragging.current = false; hoveredHex.current = null; requestDraw(); }}
                     onContextMenu={e => e.preventDefault()} />
+
+                {textInput.visible && (
+                    <input
+                        autoFocus
+                        style={{
+                            position: 'absolute',
+                            left: textInput.x * zoom + offsetRef.current.x,
+                            top: textInput.y * zoom + offsetRef.current.y,
+                            transform: 'translate(-50%, -50%)',
+                            color: textInput.color,
+                            fontSize: `${24 * zoom}px`,
+                            textShadow: '0 0 4px black'
+                        }}
+                        className="bg-transparent border-b border-white outline-none text-center min-w-[100px] z-20 font-bold"
+                        onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                                const val = e.target.value.trim();
+                                if (val) {
+                                    setCells(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color } }));
+                                }
+                                setTextInput({ visible: false, x: 0, y: 0, val: '' });
+                            } else if (e.key === 'Escape') {
+                                setTextInput({ visible: false, x: 0, y: 0, val: '' });
+                            }
+                        }}
+                        onBlur={() => setTextInput({ visible: false, x: 0, y: 0, val: '' })}
+                    />
+                )}
 
                 {toast && (
                     <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">
