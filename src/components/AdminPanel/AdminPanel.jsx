@@ -424,7 +424,7 @@ const AdminPanel = ({ forcePlanner = false }) => {
         <div className={forcePlanner ? "" : "overflow-x-auto"}>
           {viewMode === 'planner' ? (
             <div className={forcePlanner ? "" : "p-4 bg-slate-950"}>
-              <SvsPlanner />
+              <SvsPlanner isAdmin={!!adminData} />
             </div>
           ) : viewMode === 'alliances' ? (
             <table className="w-full text-left border-collapse">

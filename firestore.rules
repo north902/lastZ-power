@@ -69,5 +69,12 @@ service cloud.firestore {
       // 刪除：只有具備權限的管理員可以刪
       allow delete: if isAdmin() && isAuthorizedForAlliance(resource.data.alliance);
     }
+
+    // 4. 共享地圖集合（管理員限定）
+    match /shared_maps/{mapId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow delete: if isAdmin();
+    }
   }
 }

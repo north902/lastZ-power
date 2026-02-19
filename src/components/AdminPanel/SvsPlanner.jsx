@@ -1,534 +1,678 @@
-import React, { useState, useRef, useEffect, useMemo, memo } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-    MousePointer2,
-    Plus,
-    Trash2,
-    Download,
-    Layers,
-    ZoomIn,
-    ZoomOut,
-    Maximize,
-    Map as MapIcon,
-    ShieldAlert,
-    Sword,
-    Home,
-    Navigation
+    MousePointer2, Trash2, Download, ZoomIn, ZoomOut, Maximize,
+    Map as MapIcon, Sword, Home, Navigation, Fish, Hand, Pen,
+    Undo2, Redo2, Save, Upload, Share2, Copy, X, Clock
 } from 'lucide-react';
+import { db } from '../../config/firebase';
+import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
+// ═══════════════════════════════════════════════════════════════
+//  Constants
+// ═══════════════════════════════════════════════════════════════
+const HEX_R = 25;
+const SVS_RADIUS = 55;
+const SVS_ICE = 17;
+const SVS_SOIL = 35;
+const FISH_RADIUS = 27;
+const FISH_RED = 10;
+const MAX_HISTORY = 30;
 
-const HEX_RADIUS = 25;
-const RESTRICTED_ICE_RADIUS = 17; // 邊長 18 = 半徑 17 (禁區)
-const BLACK_SOIL_RADIUS = 35;     // 邊長 36 = 半徑 35 (土色區域)
-const MAP_RADIUS = 55;            // 總地圖範圍 (雪地)
+const HQ_SHAPE = [[0, 0], [1, -1], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1]];
+const CANNON_SHAPE = [[0, 0], [0, -1], [0, 1]];
+const BATTERY_SHAPE = (() => {
+    const s = [];
+    for (let q = -3; q <= 3; q++) for (let r = -3; r <= 3; r++) if (Math.abs(-q - r) <= 3) s.push([q, r]);
+    return s;
+})();
 
-// 建築物模板：2x3x2 蜂巢群組 (大六角形)
-const HQ_SHAPE = [
-    { q: 0, r: 0 },   // 中心
-    { q: 1, r: -1 },  // 右上
-    { q: 1, r: 0 },   // 右
-    { q: 0, r: 1 },   // 右下
-    { q: -1, r: 1 },  // 左下
-    { q: -1, r: 0 },  // 左
-    { q: 0, r: -1 },  // 左上
+const DRAGON_RADIUS = 4;
+const DRAGON_ZONE = new Set();
+for (let q = -DRAGON_RADIUS; q <= DRAGON_RADIUS; q++)
+    for (let r = -DRAGON_RADIUS; r <= DRAGON_RADIUS; r++)
+        if (Math.abs(-q - r) <= DRAGON_RADIUS) DRAGON_ZONE.add(`${q},${r}`);
+
+const SVS_BATTERIES = [
+    { id: '1', cq: -16, cr: 16 },
+    { id: '2', cq: 0, cr: -16 },
+    { id: '3', cq: 16, cr: 0 },
 ];
 
-// 哨塔/大砲形狀
-const CANNON_SHAPE = [
-    { q: 0, r: 0 },
-    { q: 0, r: -1 },
-    { q: 0, r: 1 },
-];
+// ═══════════════════════════════════════════════════════════════
+//  Hex Math
+// ═══════════════════════════════════════════════════════════════
+const S3 = Math.sqrt(3);
+const hex2px = (q, r) => [HEX_R * (S3 * q + S3 / 2 * r), HEX_R * 1.5 * r];
+const hexDist = (q, r) => Math.max(Math.abs(q), Math.abs(r), Math.abs(-q - r));
+const roundHex = (fq, fr) => {
+    let q = Math.round(fq), r = Math.round(fr), s = Math.round(-fq - fr);
+    const dq = Math.abs(q - fq), dr = Math.abs(r - fr), ds = Math.abs(s + fq + fr);
+    if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+    return [q, r];
+};
+const px2hex = (wx, wy) => roundHex((S3 / 3 * wx - wy / 3) / HEX_R, (2 / 3 * wy) / HEX_R);
 
-// 固定砲台形狀：邊長 4 (半徑 3)
-const BATTERY_RADIUS = 3;
-const generateBatteryShape = () => {
-    const shape = [];
-    for (let q = -3; q <= 3; q++) {
-        for (let r = -3; r <= 3; r++) {
-            const s = -q - r;
-            if (Math.abs(q) <= 3 && Math.abs(r) <= 3 && Math.abs(s) <= 3) {
-                shape.push({ q, r });
+const HEX_VERTS = Array.from({ length: 6 }, (_, i) => {
+    const a = Math.PI / 180 * (60 * i + 30);
+    return [HEX_R * Math.cos(a), HEX_R * Math.sin(a)];
+});
+
+// 6 hex edge vertex pairs: [vertexA, vertexB] for each edge
+const EDGE_VERTS = [[5, 0], [0, 1], [1, 2], [2, 3], [3, 4], [4, 5]];
+
+// Fishpond default territory borders (always rendered, not part of cells state)
+const FISHPOND_BORDERS = {
+    '-2,5': [3], '-3,6': [5, 0], '-3,7': [5], '-2,7': [3], '-3,8': [5], '-2,8': [3], '-3,9': [5], '-2,9': [1, 2, 3], '-1,9': [1, 2], '-1,10': [5], '0,9': [1], '1,9': [2],
+    '1,10': [4, 5, 0], '1,11': [5], '2,11': [3, 1], '1,12': [5], '2,12': [5], '3,11': [1], '3,12': [5], '4,11': [1], '5,11': [2],
+    '5,12': [3, 2], '5,13': [3, 2], '5,14': [3, 2], '5,15': [3, 2], '5,16': [3, 2], '5,17': [4, 5], '6,17': [4], '7,16': [2], '7,17': [4], '8,16': [2],
+    '8,17': [3, 2], '8,18': [3, 1], '7,19': [5], '9,18': [2],
+    '5,-3': [4], '6,-3': [4], '6,-4': [2], '7,-4': [4, 3], '8,-4': [5, 4], '8,-5': [2], '9,-4': [4], '10,-5': [4, 3, 5], '11,-5': [4, 5],
+    '12,-6': [1], '13,-6': [2, 1, 0], '14,-6': [4], '15,-7': [2, 1], '15,-6': [5], '16,-6': [4], '17,-7': [3, 4], '18,-8': [3, 4],
+    '19,-9': [3, 4, 5], '20,-9': [4], '20,-10': [0], '21,-11': [1, 0], '22,-11': [4], '23,-12': [3, 4], '24,-13': [3, 4], '25,-14': [4, 3], '26,-15': [3, 4], '27,-16': [3, 4],
+    '-5,3': [3, 4], '-6,4': [3, 4], '-7,5': [4], '-8,5': [3, 4, 5], '-9,5': [2, 1], '-10,5': [2, 1], '-11,5': [2], '-11,6': [4],
+    '-12,5': [1, 2], '-13,5': [1, 2], '-14,5': [1, 2], '-15,5': [1], '-16,6': [0, 1], '-17,6': [2], '-17,7': [5, 4], '-18,6': [2], '-18,7': [4],
+    '-19,6': [2, 1], '-20,6': [1], '-21,7': [0, 1], '-22,8': [5, 4], '-23,7': [1], '-23,8': [5], '-24,8': [5, 4], '-25,8': [0, 1, 2], '-26,9': [4], '-27,9': [5, 4]
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  Shared draw logic (used by both viewport + full-map export)
+// ═══════════════════════════════════════════════════════════════
+function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex) {
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = -radius; r <= radius; r++) {
+            if (Math.abs(-q - r) > radius) continue;
+            const [cx, cy] = hex2px(q, r);
+            const key = `${q},${r}`, cell = cs[key], dist = hexDist(q, r);
+
+            let fill, stroke, sw = 0.6;
+            if (mode === 'fishpond') {
+                if (DRAGON_ZONE.has(key)) { fill = 'rgba(30,58,138,0.75)'; stroke = 'rgba(59,130,246,0.4)'; }
+                else if (dist <= FISH_RED) {
+                    fill = 'rgba(56,189,248,0.18)'; stroke = 'rgba(56,189,248,0.25)';
+                    if (dist === FISH_RED) { stroke = 'rgba(14,165,233,0.6)'; sw = 2.5; }
+                } else { fill = 'rgba(248,250,252,0.3)'; stroke = 'rgba(186,230,253,0.2)'; }
+            } else {
+                if (dist <= SVS_ICE) {
+                    fill = 'rgba(30,58,138,0.6)'; stroke = 'rgba(59,130,246,0.3)';
+                    if (dist === SVS_ICE) { stroke = '#06b6d4'; sw = 2.5; }
+                } else if (dist <= SVS_SOIL) {
+                    fill = 'rgba(120,113,108,0.4)'; stroke = 'rgba(168,162,158,0.2)';
+                    if (dist === SVS_SOIL) { stroke = '#d97706'; sw = 2.5; }
+                } else { fill = 'rgba(248,250,252,0.3)'; stroke = 'rgba(186,230,253,0.2)'; }
+            }
+            if (cell && cell.type !== 'border') { fill = cell.color; stroke = 'rgba(255,255,255,0.8)'; if (cell.isCenter) sw = 2; }
+
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
+                i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
+            }
+            ctx.closePath();
+            ctx.fillStyle = fill; ctx.globalAlpha = cell?.type === 'color' ? 0.5 : 1;
+            ctx.fill(); ctx.globalAlpha = 1;
+            ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.stroke();
+
+            if (hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r) {
+                ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.fill();
             }
         }
     }
-    return shape;
-};
-const BATTERY_SHAPE = generateBatteryShape();
+    // Default fishpond territory borders (always visible)
+    if (mode === 'fishpond') {
+        ctx.lineCap = 'round'; ctx.lineWidth = 2.5;
+        ctx.strokeStyle = '#86efac';
+        for (const [bk, edges] of Object.entries(FISHPOND_BORDERS)) {
+            const [bq, br] = bk.split(',').map(Number);
+            const [bcx, bcy] = hex2px(bq, br);
+            for (const ei of edges) {
+                const [va, vb] = EDGE_VERTS[ei];
+                ctx.beginPath();
+                ctx.moveTo(bcx + HEX_VERTS[va][0], bcy + HEX_VERTS[va][1]);
+                ctx.lineTo(bcx + HEX_VERTS[vb][0], bcy + HEX_VERTS[vb][1]);
+                ctx.stroke();
+            }
+        }
+    }
+    // User-drawn border lines (additional custom borders)
+    ctx.lineCap = 'round'; ctx.lineWidth = 2.5;
+    for (const bk of Object.keys(cs)) {
+        const bc = cs[bk];
+        if (bc?.type !== 'border') continue;
+        const [bq, br] = bk.split(',').map(Number);
+        const [bcx, bcy] = hex2px(bq, br);
+        ctx.strokeStyle = bc.color || 'rgba(144,238,144,0.8)';
+        for (const ei of bc.edges || []) {
+            const [va, vb] = EDGE_VERTS[ei];
+            ctx.beginPath();
+            ctx.moveTo(bcx + HEX_VERTS[va][0], bcy + HEX_VERTS[va][1]);
+            ctx.lineTo(bcx + HEX_VERTS[vb][0], bcy + HEX_VERTS[vb][1]);
+            ctx.stroke();
+        }
+    }
+    // Labels & icons
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (let q = -radius; q <= radius; q++) {
+        for (let r = -radius; r <= radius; r++) {
+            if (Math.abs(-q - r) > radius) continue;
+            const key = `${q},${r}`, cell = cs[key], [cx, cy] = hex2px(q, r);
+            if (showCoords && q % 5 === 0 && r % 5 === 0 && !cell?.label) {
+                ctx.font = '5px monospace'; ctx.fillStyle = 'rgba(100,180,255,0.35)';
+                ctx.fillText(`${q},${r}`, cx, cy);
+            }
+            if (cell?.label) {
+                ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = 'white';
+                ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 4;
+                ctx.fillText(cell.label, cx, cy); ctx.shadowBlur = 0;
+            }
+            if (cell?.isCenter && cell.type === 'hq') { ctx.font = '14px serif'; ctx.fillText('🏠', cx, cy); }
+            if (cell?.isCenter && cell.type === 'cannon') { ctx.font = '14px serif'; ctx.fillText('⚔️', cx, cy); }
+            if (mode === 'fishpond' && q === 0 && r === 0 && !cell) { ctx.font = '20px serif'; ctx.fillText('🐉', cx, cy); }
+        }
+    }
+}
 
-export const SvsPlanner = () => {
+// ═══════════════════════════════════════════════════════════════
+//  Component
+// ═══════════════════════════════════════════════════════════════
+export const SvsPlanner = ({ isAdmin = false }) => {
+    const [mapMode, setMapMode] = useState('svs');
     const [cells, setCells] = useState({});
-    const [selectedTool, setSelectedTool] = useState('brush');
-    const [selectedColor, setSelectedColor] = useState('#3b82f6');
-    const [zoom, setZoom] = useState(0.8);
-    const [offset, setOffset] = useState({ x: 300, y: 300 });
-    const [showCoords, setShowCoords] = useState(true);
-    const [viewSize, setViewSize] = useState({ w: 800, h: 600 });
+    const [tool, setTool] = useState('hand');
+    const [color, setColor] = useState('#3b82f6');
+    const [showCoords, setShowCoords] = useState(false);
+    const [zoom, setZoom] = useState(1);
+    const [toast, setToast] = useState('');
+    const [showShared, setShowShared] = useState(false);
+    const [sharedMaps, setSharedMaps] = useState([]);
+    const [sharedLoading, setSharedLoading] = useState(false);
 
+    const canvasRef = useRef(null);
     const containerRef = useRef(null);
+    const offsetRef = useRef({ x: 0, y: 0 });
+    const zoomRef = useRef(1);
+    const cellsRef = useRef({});
+    const mapModeRef = useRef('svs');
+    const showCoordsRef = useRef(false);
+    const toolRef = useRef('hand');
+    const colorRef = useRef('#3b82f6');
     const isDragging = useRef(false);
     const lastPos = useRef({ x: 0, y: 0 });
+    const dragStart = useRef({ x: 0, y: 0 });
+    const hoveredHex = useRef(null);
+    const rafId = useRef(null);
+    const dprRef = useRef(1);
 
-    // 初始化與重置地圖
-    const initDefaultMap = () => {
-        const newCells = {};
+    // History
+    const historyRef = useRef([{}]);
+    const historyIdx = useRef(0);
+    const skipHistory = useRef(false);
 
-        // 定義三個固定砲台的位置與資訊 (中心移至 16 格處，確保外緣剛好只露出 2 格)
-        const basicBatteries = [
-            { id: '1', name: '1號砲台', center: { q: -16, r: 16 }, label: '1' }, // 左下角
-            { id: '2', name: '2號砲台', center: { q: 0, r: -16 }, label: '2' },  // 左上角
-            { id: '3', name: '3號砲台', center: { q: 16, r: 0 }, label: '3' },   // 中右角
-        ];
+    const pushHistory = (nc) => {
+        if (skipHistory.current) { skipHistory.current = false; return; }
+        const h = historyRef.current.slice(0, historyIdx.current + 1);
+        h.push(JSON.parse(JSON.stringify(nc)));
+        if (h.length > MAX_HISTORY) h.shift();
+        historyRef.current = h; historyIdx.current = h.length - 1;
+    };
+    const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
+    const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-        basicBatteries.forEach(bat => {
-            const pk = `battery_${bat.id}`;
-            BATTERY_SHAPE.forEach(offset => {
-                const q = bat.center.q + offset.q;
-                const r = bat.center.r + offset.r;
-                newCells[`${q},${r}`] = {
-                    type: 'battery',
-                    color: 'rgba(153, 27, 27, 0.7)', // 深紅色背景
-                    parent: pk,
-                    isCenter: offset.q === 0 && offset.r === 0,
-                    label: offset.q === 0 && offset.r === 0 ? bat.label : null
-                };
+    const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
+
+    // Sync refs
+    useEffect(() => { cellsRef.current = cells; pushHistory(cells); requestDraw(); }, [cells]);
+    useEffect(() => { mapModeRef.current = mapMode; requestDraw(); }, [mapMode]);
+    useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
+    useEffect(() => { toolRef.current = tool; }, [tool]);
+    useEffect(() => { colorRef.current = color; }, [color]);
+
+    // --- localStorage save/load ---
+    const sKey = (m) => `svs_planner_${m}`;
+    const saveLocal = () => {
+        localStorage.setItem(sKey(mapModeRef.current), JSON.stringify({ cells: cellsRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        showToast('💾 已儲存！');
+    };
+    const loadLocal = (mode) => {
+        try {
+            const d = JSON.parse(localStorage.getItem(sKey(mode)));
+            if (!d?.cells) return false;
+            let cells = d.cells;
+            // Fishpond: strip out battery/cannon cells (they don't belong here)
+            if (mode === 'fishpond') {
+                cells = Object.fromEntries(
+                    Object.entries(cells).filter(([, v]) => v.type !== 'battery' && v.type !== 'cannon')
+                );
+            }
+            skipHistory.current = true; setCells(cells);
+            if (d.zoom) { zoomRef.current = d.zoom; setZoom(d.zoom); }
+            if (d.offset) offsetRef.current = d.offset;
+            historyRef.current = [JSON.parse(JSON.stringify(cells))]; historyIdx.current = 0;
+            return true;
+        } catch { return false; }
+    };
+
+    // --- JSON export/import (for all users) ---
+    const exportJSON = () => {
+        const title = prompt('請輸入地圖標題：', `${mapModeRef.current === 'svs' ? 'SVS戰略圖' : '魚池防守圖'}`);
+        if (!title) return;
+        const data = { version: 1, mapMode: mapModeRef.current, title, cells: cellsRef.current, exportedAt: new Date().toISOString() };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.download = `map-${title.replace(/\s+/g, '_')}.json`;
+        link.href = URL.createObjectURL(blob);
+        link.click(); URL.revokeObjectURL(link.href);
+        showToast('📁 已匯出 JSON！');
+    };
+    const importJSON = () => {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.json';
+        input.onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const d = JSON.parse(ev.target.result);
+                    if (!d.cells) throw new Error();
+                    if (d.mapMode && d.mapMode !== mapModeRef.current) {
+                        setMapMode(d.mapMode); mapModeRef.current = d.mapMode;
+                    }
+                    skipHistory.current = true;
+                    setCells(d.cells);
+                    historyRef.current = [JSON.parse(JSON.stringify(d.cells))]; historyIdx.current = 0;
+                    centerMap();
+                    showToast(`📂 已載入: ${d.title || 'Untitled'}`);
+                } catch { showToast('❌ 檔案格式錯誤'); }
+            };
+            reader.readAsText(e.target.files[0]);
+        };
+        input.click();
+    };
+
+    // --- Firestore cloud sharing (admin only) ---
+    const publishToCloud = async () => {
+        const title = prompt('請輸入共享地圖標題：');
+        if (!title) return;
+        try {
+            const id = `${mapModeRef.current}_${Date.now()}`;
+            await setDoc(doc(db, 'shared_maps', id), {
+                title, mapMode: mapModeRef.current,
+                cells: cellsRef.current,
+                publishedAt: serverTimestamp(),
+            });
+            showToast('☁️ 已發佈到共享區！');
+        } catch (err) { showToast('❌ 發佈失敗：' + err.message); }
+    };
+    const loadSharedList = async () => {
+        setSharedLoading(true);
+        try {
+            const q2 = query(collection(db, 'shared_maps'), orderBy('publishedAt', 'desc'));
+            const snap = await getDocs(q2);
+            setSharedMaps(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (err) { showToast('❌ 讀取失敗'); }
+        setSharedLoading(false);
+    };
+    const copySharedMap = (map) => {
+        if (map.mapMode && map.mapMode !== mapModeRef.current) {
+            setMapMode(map.mapMode); mapModeRef.current = map.mapMode;
+        }
+        skipHistory.current = true;
+        setCells(JSON.parse(JSON.stringify(map.cells)));
+        historyRef.current = [JSON.parse(JSON.stringify(map.cells))]; historyIdx.current = 0;
+        centerMap();
+        setShowShared(false);
+        showToast(`📋 已複製: ${map.title}`);
+    };
+    const deleteSharedMap = async (id) => {
+        if (!window.confirm('確定刪除此共享地圖？')) return;
+        await deleteDoc(doc(db, 'shared_maps', id));
+        setSharedMaps(prev => prev.filter(m => m.id !== id));
+        showToast('🗑️ 已刪除');
+    };
+
+    // --- Init ---
+    const buildSvsCells = () => {
+        const c = {};
+        SVS_BATTERIES.forEach(b => {
+            BATTERY_SHAPE.forEach(([oq, or]) => {
+                const q = b.cq + oq, r = b.cr + or;
+                c[`${q},${r}`] = { type: 'battery', color: 'rgba(153,27,27,0.7)', parent: `bat_${b.id}`, isCenter: oq === 0 && or === 0, label: oq === 0 && or === 0 ? b.id : null };
             });
         });
-
-        setCells(newCells);
+        return c;
     };
+    const buildFishpondCells = () => ({});
+    useEffect(() => { if (!loadLocal('svs')) { skipHistory.current = true; setCells(buildSvsCells()); historyRef.current = [buildSvsCells()]; } }, []);
 
-    useEffect(() => {
-        if (Object.keys(cells).length === 0) {
-            initDefaultMap();
+    const switchMap = (mode) => {
+        if (mode === mapMode) return;
+        // Save current map to localStorage
+        localStorage.setItem(sKey(mapModeRef.current), JSON.stringify({ cells: cellsRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        // Immediately sync refs BEFORE any drawing/loading
+        mapModeRef.current = mode;
+        setMapMode(mode); setTool('hand');
+        historyRef.current = [{}]; historyIdx.current = 0;
+        if (!loadLocal(mode)) {
+            skipHistory.current = true;
+            const nc = mode === 'svs' ? buildSvsCells() : buildFishpondCells();
+            setCells(nc); historyRef.current = [JSON.parse(JSON.stringify(nc))]; historyIdx.current = 0;
+            const z = mode === 'svs' ? 0.8 : 1.2; zoomRef.current = z; setZoom(z);
+            centerMap();
         }
-    }, []);
+    };
+    const resetMap = () => { if (!window.confirm('確定要重置地圖？')) return; const nc = mapModeRef.current === 'svs' ? buildSvsCells() : buildFishpondCells(); skipHistory.current = true; setCells(nc); historyRef.current = [JSON.parse(JSON.stringify(nc))]; historyIdx.current = 0; };
+    const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
 
-    const resetMap = () => {
-        if (!window.confirm('確定要清除所有標記並重置地圖嗎？')) return;
-        initDefaultMap();
+    // --- Full-map PNG export ---
+    const exportImage = () => {
+        const mode = mapModeRef.current;
+        const radius = mode === 'svs' ? SVS_RADIUS : FISH_RADIUS;
+        // Calculate map bounding box
+        const padding = HEX_R * 2;
+        const [minX, minY] = hex2px(-radius, 0);
+        const [maxX, maxY] = hex2px(radius, 0);
+        const [, topY] = hex2px(0, -radius);
+        const [, botY] = hex2px(0, radius);
+        const w = (maxX - minX) + padding * 2;
+        const h = (botY - topY) + padding * 2;
+        const centerX = (minX + maxX) / 2;
+        const centerY = (topY + botY) / 2;
+
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = w * 2; tmpCanvas.height = h * 2; // 2x for crisp
+        const ctx = tmpCanvas.getContext('2d');
+        ctx.scale(2, 2);
+        // Dark background
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0, 0, w, h);
+        ctx.translate(w / 2 - centerX, h / 2 - centerY);
+        drawMap(ctx, mode, cellsRef.current, radius, false, null);
+        ctx.restore();
+
+        const link = document.createElement('a');
+        link.download = `strategy-${mode}-${new Date().toISOString().slice(0, 10)}.png`;
+        link.href = tmpCanvas.toDataURL('image/png');
+        link.click();
+        showToast('📸 已匯出完整地圖！');
     };
 
-    // 處理滾輪縮放而不觸發頁面滾動
+    // --- Canvas setup ---
     useEffect(() => {
-        const container = containerRef.current;
-        if (!container) return;
-
-        const handleWheel = (e) => {
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? -0.05 : 0.05;
-            setZoom(z => Math.min(3, Math.max(0.2, z + delta)));
+        const resize = () => {
+            const canvas = canvasRef.current, cont = containerRef.current;
+            if (!canvas || !cont) return;
+            const dpr = window.devicePixelRatio || 1; dprRef.current = dpr;
+            const rect = cont.getBoundingClientRect();
+            canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
+            canvas.style.width = `${rect.width}px`; canvas.style.height = `${rect.height}px`;
+            if (offsetRef.current.x === 0) offsetRef.current = { x: rect.width / 2, y: rect.height / 2 };
+            requestDraw();
         };
-
-        container.addEventListener('wheel', handleWheel, { passive: false });
-        return () => container.removeEventListener('wheel', handleWheel);
+        resize();
+        window.addEventListener('resize', resize);
+        return () => window.removeEventListener('resize', resize);
     }, []);
 
-    // 轉換網格座標為畫布像素座標 (純幾何計算，不包含位移)
-    const hexToPixel = (q, r) => {
-        const x = HEX_RADIUS * (Math.sqrt(3) * q + (Math.sqrt(3) / 2) * r);
-        const y = HEX_RADIUS * (3 / 2) * r;
-        return { x, y };
-    };
-
-    // 轉換像素座標為網格座標 (用於點擊檢測)
-    const pixelToHex = (mouseX, mouseY) => {
-        // 先扣除平移量並還原縮放比例
-        const x = (mouseX - offset.x) / zoom;
-        const y = (mouseY - offset.y) / zoom;
-
-        const q = (Math.sqrt(3) / 3 * x - 1 / 3 * y) / HEX_RADIUS;
-        const r = (2 / 3 * y) / HEX_RADIUS;
-        return roundHex(q, r);
-    };
-
-    // 監聽容器尺寸變化
     useEffect(() => {
-        const updateSize = () => {
-            if (containerRef.current) {
-                setViewSize({
-                    w: containerRef.current.clientWidth,
-                    h: containerRef.current.clientHeight
-                });
-            }
-        };
-        updateSize();
-        window.addEventListener('resize', updateSize);
-        return () => window.removeEventListener('resize', updateSize);
+        const cont = containerRef.current; if (!cont) return;
+        const onWheel = (e) => { e.preventDefault(); zoomRef.current = Math.min(3, Math.max(0.15, zoomRef.current + (e.deltaY > 0 ? -0.08 : 0.08))); setZoom(zoomRef.current); requestDraw(); };
+        cont.addEventListener('wheel', onWheel, { passive: false });
+        return () => cont.removeEventListener('wheel', onWheel);
     }, []);
 
-    const roundHex = (fracQ, fracR) => {
-        let q = Math.round(fracQ);
-        let r = Math.round(fracR);
-        let s = Math.round(-fracQ - fracR);
-        const qDiff = Math.abs(q - fracQ);
-        const rDiff = Math.abs(r - fracR);
-        const sDiff = Math.abs(s - (-fracQ - fracR));
-        if (qDiff > rDiff && qDiff > sDiff) q = -r - s;
-        else if (rDiff > sDiff) r = -q - s;
-        return { q, r };
+    useEffect(() => {
+        const onKey = (e) => {
+            if (e.ctrlKey && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+            if (e.ctrlKey && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+            if (e.ctrlKey && e.key === 's') { e.preventDefault(); saveLocal(); }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
+    // --- Draw ---
+    const requestDraw = useCallback(() => {
+        if (rafId.current) cancelAnimationFrame(rafId.current);
+        rafId.current = requestAnimationFrame(draw);
+    }, []);
+
+    const draw = () => {
+        const canvas = canvasRef.current; if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = dprRef.current;
+        const mode = mapModeRef.current;
+        const radius = mode === 'svs' ? SVS_RADIUS : FISH_RADIUS;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.translate(offsetRef.current.x, offsetRef.current.y);
+        ctx.scale(zoomRef.current, zoomRef.current);
+        drawMap(ctx, mode, cellsRef.current, radius, showCoordsRef.current, hoveredHex.current);
+        ctx.restore();
     };
 
+    // --- Mouse ---
+    const getWorldPos = (e) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        return [(e.clientX - rect.left - offsetRef.current.x) / zoomRef.current, (e.clientY - rect.top - offsetRef.current.y) / zoomRef.current];
+    };
     const handleMouseDown = (e) => {
-        if (e.button === 1 || (e.button === 0 && e.altKey)) { // 中鍵或 Alt+左鍵 拖拽
-            isDragging.current = true;
-            lastPos.current = { x: e.clientX, y: e.clientY };
-            e.preventDefault();
+        dragStart.current = { x: e.clientX, y: e.clientY };
+        if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
+            isDragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
         }
     };
-
     const handleMouseMove = (e) => {
         if (isDragging.current) {
-            const dx = e.clientX - lastPos.current.x;
-            const dy = e.clientY - lastPos.current.y;
-            setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+            const dx = e.clientX - lastPos.current.x, dy = e.clientY - lastPos.current.y;
             lastPos.current = { x: e.clientX, y: e.clientY };
+            offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
+            requestDraw(); return;
         }
+        const [wx, wy] = getWorldPos(e);
+        const [hq, hr] = px2hex(wx, wy);
+        const p = hoveredHex.current;
+        if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
     };
-
-    const applyAction = (q, r) => {
+    const handleMouseUp = (e) => {
+        if (isDragging.current) { isDragging.current = false; return; }
+        const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 4) return;
+        if (e.button !== 0 || toolRef.current === 'hand') return;
+        const [wx, wy] = getWorldPos(e);
+        const [q, r] = px2hex(wx, wy);
+        applyTool(q, r, wx, wy);
+    };
+    const applyTool = (q, r, wx, wy) => {
+        const t = toolRef.current, c = colorRef.current, mode = mapModeRef.current;
         setCells(prev => {
-            const key = `${q},${r}`;
-            let newCells = { ...prev };
-
-            if (selectedTool === 'brush') {
-                newCells[key] = { type: 'color', color: selectedColor };
-            } else if (selectedTool === 'eraser') {
-                const target = newCells[key];
-                if (target?.parent) {
-                    const pKey = target.parent;
-                    Object.keys(newCells).forEach(k => {
-                        if (newCells[k].parent === pKey) delete newCells[k];
-                    });
+            const key = `${q},${r}`, nc = { ...prev };
+            if (mode === 'fishpond' && DRAGON_ZONE.has(key) && t !== 'eraser') return prev;
+            if (t === 'brush') nc[key] = { type: 'color', color: c };
+            else if (t === 'border') {
+                // Detect which edge was clicked based on angle from hex center
+                const [cx, cy] = hex2px(q, r);
+                let ang = Math.atan2(wy - cy, wx - cx) * 180 / Math.PI;
+                if (ang < 0) ang += 360;
+                const edgeIdx = Math.round(ang / 60) % 6;
+                const existing = nc[key];
+                if (existing?.type === 'border') {
+                    const edges = new Set(existing.edges);
+                    if (edges.has(edgeIdx)) edges.delete(edgeIdx);
+                    else edges.add(edgeIdx);
+                    if (edges.size === 0) delete nc[key];
+                    else nc[key] = { ...existing, edges: [...edges], color: c };
                 } else {
-                    delete newCells[key];
+                    nc[key] = { type: 'border', edges: [edgeIdx], color: c };
                 }
-            } else if (selectedTool === 'hq' || selectedTool === 'cannon') {
-                const shape = selectedTool === 'hq' ? HQ_SHAPE : CANNON_SHAPE;
-
-                // 檢查是否與現有建築重疊，以及是否進入禁區
-                const isInvalid = shape.some(offset => {
-                    const tQ = q + offset.q;
-                    const tR = r + offset.r;
-                    const tKey = `${tQ},${tR}`;
-                    const targetCell = newCells[tKey];
-
-                    // 1. 建築物重疊規則 (顏色標記除外)
-                    if (targetCell && targetCell.type !== 'color') return true;
-
-                    // 2. 禁區限制規則 (不能蓋在冰層內，冰層半徑為 RESTRICTED_ICE_RADIUS)
-                    const dist = Math.max(Math.abs(tQ), Math.abs(tR), Math.abs(-tQ - tR));
-                    if (dist <= RESTRICTED_ICE_RADIUS) return true;
-
+            }
+            else if (t === 'eraser') {
+                const tgt = nc[key];
+                if (tgt?.parent) { Object.keys(nc).forEach(k => { if (nc[k].parent === tgt.parent) delete nc[k]; }); }
+                else delete nc[key];
+            } else if (t === 'hq' || t === 'cannon') {
+                const shape = t === 'hq' ? HQ_SHAPE : CANNON_SHAPE;
+                const blocked = shape.some(([oq, or]) => {
+                    const tq = q + oq, tr = r + or, tk = `${tq},${tr}`;
+                    if (nc[tk] && nc[tk].type !== 'color' && nc[tk].type !== 'border') return true;
+                    if (mode === 'svs' && hexDist(tq, tr) <= SVS_ICE) return true;
+                    if (mode === 'fishpond' && DRAGON_ZONE.has(tk)) return true;
                     return false;
                 });
-
-                if (isInvalid) return prev;
-
-                const parentKey = key;
-                shape.forEach(offset => {
-                    const targetQ = q + offset.q;
-                    const targetR = r + offset.r;
-                    newCells[`${targetQ},${targetR}`] = {
-                        type: selectedTool,
-                        color: selectedColor,
-                        parent: parentKey,
-                        isCenter: offset.q === 0 && offset.r === 0
-                    };
-                });
+                if (blocked) return prev;
+                shape.forEach(([oq, or]) => { nc[`${q + oq},${r + or}`] = { type: t, color: c, parent: key, isCenter: oq === 0 && or === 0 }; });
             }
-            return newCells;
+            return nc;
         });
     };
 
-    const renderHex = (q, r) => {
-        const { x, y } = hexToPixel(q, r);
-        const key = `${q},${r}`;
-        const cell = cells[key];
-
-        // 判斷地形
-        const dist = Math.max(Math.abs(q), Math.abs(r), Math.abs(-q - r));
-        const isInIceZone = dist <= RESTRICTED_ICE_RADIUS;
-        const isIceBorder = dist === RESTRICTED_ICE_RADIUS;
-        const isInBlackSoil = dist <= BLACK_SOIL_RADIUS;
-        const isSoilBorder = dist === BLACK_SOIL_RADIUS;
-
-        // 計算頂點
-        const points = [];
-        for (let i = 0; i < 6; i++) {
-            const angle_rad = Math.PI / 180 * (60 * i + 30);
-            points.push(`${x + HEX_RADIUS * Math.cos(angle_rad)},${y + HEX_RADIUS * Math.sin(angle_rad)}`);
-        }
-
-        // 地形背景色 (雪季主題)
-        let terrainFill = 'rgba(248, 250, 252, 0.3)';   // 預設雪地 (Outlands)
-        let terrainStroke = 'rgba(186, 230, 253, 0.2)';
-
-        if (isInIceZone) {
-            terrainFill = 'rgba(30, 58, 138, 0.6)';    // 禁區：深藍色冰層
-            terrainStroke = 'rgba(59, 130, 246, 0.3)';
-        } else if (isInBlackSoil) {
-            terrainFill = 'rgba(120, 113, 108, 0.4)';  // 黑土：淺棕灰土色
-            terrainStroke = 'rgba(168, 162, 158, 0.2)';
-        }
-
-        return (
-            <g
-                key={key}
-                className="group/hex transition-all duration-200"
-            >
-                <polygon
-                    points={points.join(' ')}
-                    onClick={() => applyAction(q, r)}
-                    fill={cell?.color || terrainFill}
-                    fillOpacity={cell?.type === 'color' ? 0.4 : 1}
-                    stroke={isIceBorder ? '#06b6d4' : (isSoilBorder ? '#d97706' : (cell ? 'rgba(255,255,255,0.8)' : terrainStroke))}
-                    strokeWidth={isIceBorder || isSoilBorder ? 3 : (cell?.isCenter ? 2.5 : 0.8)}
-                    className="cursor-pointer transition-all duration-300 hover:fill-slate-400/30"
-                />
-                {showCoords && q % 4 === 0 && r % 4 === 0 && (
-                    <text
-                        x={x} y={y}
-                        fontSize="5"
-                        textAnchor="middle"
-                        fill={isInIceZone ? "rgba(147, 197, 253, 0.3)" : (isInBlackSoil ? "rgba(68, 64, 60, 0.4)" : "rgba(14, 165, 233, 0.3)")}
-                        className="pointer-events-none select-none font-mono"
-                    >
-                        {q},{r}
-                    </text>
-                )}
-                {cell?.isCenter && (
-                    <g transform={`translate(${x - 8}, ${y - 8})`} className="pointer-events-none">
-                        {cell.type === 'hq' ? (
-                            <Home size={16} className="text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-                        ) : (
-                            <Sword size={16} className="text-white animate-pulse" />
-                        )}
-                    </g>
-                )}
-            </g>
-        );
-    };
-
-    const gridItems = useMemo(() => {
-        const items = [];
-        const range = MAP_RADIUS;
-
-        for (let q = -range; q <= range; q++) {
-            for (let r = -range; r <= range; r++) {
-                const s = -q - r;
-                if (Math.abs(s) <= range) {
-                    items.push(<HexCell
-                        key={`${q},${r}`}
-                        q={q} r={r}
-                        cell={cells[`${q},${r}`]}
-                        showCoords={showCoords}
-                        applyAction={applyAction}
-                        hexToPixel={hexToPixel}
-                    />);
-                }
-            }
-        }
-        return items;
-    }, [cells, showCoords]);
+    const cursorClass = tool === 'hand' ? 'cursor-grab active:cursor-grabbing' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
 
     return (
-        <div className="flex flex-col h-[calc(100vh-200px)] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl relative">
-            {/* 頂部工具列 */}
-            <div className="p-4 bg-slate-900/80 backdrop-blur-md border-b border-slate-800 flex items-center justify-between z-10">
-                <div className="flex items-center gap-4">
+        <div className="flex flex-col h-[calc(100vh-200px)] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
+            {/* Toolbar */}
+            <div className="p-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between z-10 flex-wrap gap-2">
+                <div className="flex items-center gap-2.5 flex-wrap">
                     <div className="flex bg-slate-800 rounded-lg p-1">
-                        <ToolBtn active={selectedTool === 'brush'} onClick={() => setSelectedTool('brush')} icon={<MousePointer2 size={18} />} label="筆刷" />
-                        <ToolBtn active={selectedTool === 'hq'} onClick={() => setSelectedTool('hq')} icon={<Home size={18} />} label="放置總部" />
-                        <ToolBtn active={selectedTool === 'cannon'} onClick={() => setSelectedTool('cannon')} icon={<Sword size={18} />} label="大砲/哨塔" />
-                        <ToolBtn active={selectedTool === 'eraser'} onClick={() => setSelectedTool('eraser')} icon={<Trash2 size={18} />} label="橡皮擦" />
+                        <TabBtn active={mapMode === 'svs'} onClick={() => switchMap('svs')} icon={<MapIcon size={14} />} label="SVS" ac="bg-blue-600" />
+                        <TabBtn active={mapMode === 'fishpond'} onClick={() => switchMap('fishpond')} icon={<Fish size={14} />} label="魚池" ac="bg-rose-600" />
                     </div>
-
-                    <div className="h-6 w-[1px] bg-slate-700" />
-
-                    <div className="flex gap-2">
-                        {['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(color => (
-                            <button
-                                key={color}
-                                className={`w-8 h-8 rounded-full border-2 transition-transform ${selectedColor === color ? 'border-white scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
-                                style={{ backgroundColor: color }}
-                                onClick={() => setSelectedColor(color)}
-                            />
+                    <div className="h-6 w-px bg-slate-700" />
+                    <div className="flex bg-slate-800 rounded-lg p-1">
+                        <ToolBtn active={tool === 'hand'} onClick={() => setTool('hand')} icon={<Hand size={16} />} label="移動" />
+                        <ToolBtn active={tool === 'brush'} onClick={() => setTool('brush')} icon={<MousePointer2 size={16} />} label="筆刷" />
+                        <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={16} />} label="總部" />
+                        {mapMode === 'svs' && <ToolBtn active={tool === 'cannon'} onClick={() => setTool('cannon')} icon={<Sword size={16} />} label="哨塔" />}
+                        <ToolBtn active={tool === 'border'} onClick={() => setTool('border')} icon={<Pen size={16} />} label="邊界" />
+                        <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={16} />} label="橡皮擦" />
+                    </div>
+                    <div className="h-6 w-px bg-slate-700" />
+                    <div className="flex gap-1.5">
+                        {['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
+                            <button key={c} onClick={() => setColor(c)}
+                                className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                                style={{ backgroundColor: c }} />
                         ))}
                     </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                    <button
-                        onClick={() => setShowCoords(!showCoords)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${showCoords ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                    >
-                        <Navigation size={14} /> 顯示座標
-                    </button>
-
-                    <div className="h-6 w-[1px] bg-slate-700" />
-
-                    <div className="flex items-center gap-3 bg-slate-800/50 px-3 py-1.5 rounded-xl border border-slate-700/50">
-                        <button
-                            onClick={() => setZoom(z => Math.max(0.1, z - 0.1))}
-                            className="text-slate-400 hover:text-white transition-colors"
-                        >
-                            <ZoomOut size={16} />
-                        </button>
-
-                        <input
-                            type="range"
-                            min="0.1"
-                            max="2.5"
-                            step="0.05"
-                            value={zoom}
-                            onChange={(e) => setZoom(parseFloat(e.target.value))}
-                            className="w-24 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-
-                        <button
-                            onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}
-                            className="text-slate-400 hover:text-white transition-colors"
-                        >
-                            <ZoomIn size={16} />
-                        </button>
-
-                        <span className="text-[10px] font-mono text-blue-400 w-10 text-center">
-                            {Math.round(zoom * 100)}%
-                        </span>
+                    <div className="h-6 w-px bg-slate-700" />
+                    <div className="flex bg-slate-800 rounded-lg p-1">
+                        <ToolBtn onClick={undo} icon={<Undo2 size={15} />} label="復原 Ctrl+Z" />
+                        <ToolBtn onClick={redo} icon={<Redo2 size={15} />} label="重做 Ctrl+Y" />
                     </div>
-
-                    <button
-                        onClick={resetMap}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-slate-400 rounded-lg text-xs font-medium hover:bg-red-900/40 hover:text-red-400 transition-all border border-slate-700"
-                    >
-                        <Trash2 size={14} /> 重設地圖
+                </div>
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                        <Navigation size={12} /> 座標
                     </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-900/20 hover:from-blue-500 transition-all">
-                        <Download size={16} /> 匯出戰圖
+                    <div className="flex items-center gap-1.5 bg-slate-800/60 px-2 py-1 rounded-xl border border-slate-700/50">
+                        <button onClick={() => { zoomRef.current = Math.max(0.15, zoomRef.current - 0.1); setZoom(zoomRef.current); requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomOut size={13} /></button>
+                        <input type="range" min="0.15" max="2.5" step="0.05" value={zoom} onChange={e => { zoomRef.current = parseFloat(e.target.value); setZoom(zoomRef.current); requestDraw(); }}
+                            className="w-14 h-1 bg-slate-700 rounded cursor-pointer accent-blue-500" />
+                        <button onClick={() => { zoomRef.current = Math.min(2.5, zoomRef.current + 0.1); setZoom(zoomRef.current); requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomIn size={13} /></button>
+                        <span className="text-[9px] font-mono text-blue-400 w-7 text-center">{Math.round(zoom * 100)}%</span>
+                    </div>
+                    <button onClick={centerMap} title="置中" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white border border-slate-700"><Maximize size={13} /></button>
+                    <button onClick={saveLocal} title="儲存 Ctrl+S" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-emerald-400 border border-slate-700"><Save size={13} /></button>
+                    <button onClick={resetMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-red-400 border border-slate-700" title="重設"><Trash2 size={13} /></button>
+                    <div className="h-6 w-px bg-slate-700" />
+                    {/* JSON Export / Import (all users) */}
+                    <button onClick={exportJSON} title="匯出 JSON" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-cyan-400 border border-slate-700"><Download size={13} /></button>
+                    <button onClick={importJSON} title="匯入 JSON" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-yellow-400 border border-slate-700"><Upload size={13} /></button>
+                    {/* Cloud sharing (admin) */}
+                    {isAdmin && <>
+                        <button onClick={publishToCloud} title="發佈到共享區" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-violet-400 border border-slate-700"><Share2 size={13} /></button>
+                        <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="px-2 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold">
+                            ☁️ 共享
+                        </button>
+                    </>}
+                    <div className="h-6 w-px bg-slate-700" />
+                    <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-blue-500">
+                        📸 匯出圖片
                     </button>
                 </div>
             </div>
 
-            {/* 地圖主體 */}
-            <div
-                ref={containerRef}
-                className="flex-1 overflow-hidden cursor-move relative"
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={() => isDragging.current = false}
-                onMouseLeave={() => isDragging.current = false}
-            >
-                <svg
-                    width="100%"
-                    height="100%"
-                    className="absolute inset-0"
-                >
-                    <g transform={`translate(${offset.x}, ${offset.y}) scale(${zoom})`}>
-                        {gridItems}
-                    </g>
-                </svg>
+            {/* Canvas */}
+            <div ref={containerRef} className="flex-1 relative overflow-hidden">
+                <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
+                    onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
+                    onMouseLeave={() => { isDragging.current = false; hoveredHex.current = null; requestDraw(); }}
+                    onContextMenu={e => e.preventDefault()} />
 
-                {/* 右下角說明 */}
-                <div className="absolute bottom-6 right-6 bg-slate-900/60 backdrop-blur border border-slate-700 p-4 rounded-xl pointer-events-none">
-                    <h4 className="text-blue-400 font-bold text-xs mb-2 uppercase tracking-widest">操作指南</h4>
-                    <ul className="text-[10px] text-slate-400 space-y-1">
-                        <li>• <b>滑鼠左鍵</b>: 執行工具動作</li>
-                        <li>• <b>滾輪</b>: 縮放地圖</li>
-                        <li>• <b>Alt + 左鍵</b>: 拖拽移動地圖</li>
-                        <li>• <b>橡皮擦</b>: 點擊建築任一格可拆除整座</li>
-                    </ul>
+                {toast && (
+                    <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">
+                        {toast}
+                    </div>
+                )}
+
+                {/* Shared maps modal (admin) */}
+                {showShared && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                        <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-[500px] max-h-[80%] flex flex-col overflow-hidden">
+                            <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+                                <h3 className="text-white font-bold flex items-center gap-2">☁️ 共享地圖列表</h3>
+                                <button onClick={() => setShowShared(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                                {sharedLoading ? (
+                                    <p className="text-center text-slate-500 py-8">載入中...</p>
+                                ) : sharedMaps.length === 0 ? (
+                                    <p className="text-center text-slate-500 py-8">尚無共享地圖</p>
+                                ) : sharedMaps.map(m => (
+                                    <div key={m.id} className="bg-slate-800 rounded-xl p-3 flex items-center justify-between border border-slate-700 hover:border-slate-600 transition-colors">
+                                        <div>
+                                            <p className="text-white font-bold text-sm">{m.title}</p>
+                                            <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
+                                                <span className={`px-1.5 py-0.5 rounded ${m.mapMode === 'svs' ? 'bg-blue-900/50 text-blue-400' : 'bg-rose-900/50 text-rose-400'}`}>
+                                                    {m.mapMode === 'svs' ? 'SVS' : '魚池'}
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    <Clock size={10} />
+                                                    {m.publishedAt?.toDate?.()?.toLocaleString('zh-TW')?.slice(0, 16) || '—'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                            <button onClick={() => copySharedMap(m)} className="px-2.5 py-1.5 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-500 flex items-center gap-1">
+                                                <Copy size={12} /> 複製
+                                            </button>
+                                            <button onClick={() => deleteSharedMap(m.id)} className="p-1.5 text-slate-500 hover:text-red-400 rounded-lg hover:bg-red-900/20">
+                                                <Trash2 size={13} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Legend */}
+                <div className="absolute bottom-4 right-4 bg-slate-900/70 backdrop-blur border border-slate-700 p-3 rounded-xl pointer-events-none text-[10px] text-slate-400 space-y-1">
+                    <h4 className="text-blue-400 font-bold text-xs uppercase tracking-widest mb-1.5">操作指南</h4>
+                    <p>✋ <b>手掌</b>：拖曳 ┃ 🔄 <b>滾輪</b>：縮放</p>
+                    <p>💾 <b>Ctrl+S</b>：儲存 ┃ ↩️ <b>Ctrl+Z/Y</b>：復原</p>
+                    <p>📁 <b>匯出/匯入 JSON</b>：分享地圖檔案</p>
+                    {mapMode === 'fishpond' && (
+                        <div className="mt-2 pt-2 border-t border-slate-700 space-y-1">
+                            <p className="text-rose-400 font-bold">魚池圖例</p>
+                            <p>🔴 限時區 ┃ 🐉 龍出生區 ┃ 🟢 領地邊界</p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
     );
 };
 
-const HexCell = memo(({ q, r, cell, showCoords, applyAction, hexToPixel }) => {
-    const { x, y } = hexToPixel(q, r);
-
-    // 判斷地形
-    const dist = Math.max(Math.abs(q), Math.abs(r), Math.abs(-q - r));
-    const isInIceZone = dist <= RESTRICTED_ICE_RADIUS;
-    const isIceBorder = dist === RESTRICTED_ICE_RADIUS;
-    const isInBlackSoil = dist <= BLACK_SOIL_RADIUS;
-    const isSoilBorder = dist === BLACK_SOIL_RADIUS;
-
-    // 計算頂點
-    const points = useMemo(() => {
-        const pts = [];
-        for (let i = 0; i < 6; i++) {
-            const angle_rad = Math.PI / 180 * (60 * i + 30);
-            pts.push(`${x + HEX_RADIUS * Math.cos(angle_rad)},${y + HEX_RADIUS * Math.sin(angle_rad)}`);
-        }
-        return pts.join(' ');
-    }, [x, y]);
-
-    // 地形背景色 (雪季主題)
-    let terrainFill = 'rgba(248, 250, 252, 0.3)';   // 預設雪地 (Outlands)
-    let terrainStroke = 'rgba(186, 230, 253, 0.2)';
-
-    if (isInIceZone) {
-        terrainFill = 'rgba(30, 58, 138, 0.6)';    // 禁區：深藍色冰層
-        terrainStroke = 'rgba(59, 130, 246, 0.3)';
-    } else if (isInBlackSoil) {
-        terrainFill = 'rgba(120, 113, 108, 0.4)';  // 黑土：淺棕灰土色
-        terrainStroke = 'rgba(168, 162, 158, 0.2)';
-    }
-
-    return (
-        <g className="group/hex transition-all duration-200">
-            <polygon
-                points={points}
-                onClick={() => applyAction(q, r)}
-                fill={cell?.color || terrainFill}
-                fillOpacity={cell?.type === 'color' ? 0.4 : 1}
-                stroke={isIceBorder ? '#06b6d4' : (isSoilBorder ? '#d97706' : (cell ? 'rgba(255,255,255,0.8)' : terrainStroke))}
-                strokeWidth={isIceBorder || isSoilBorder ? 3 : (cell?.isCenter ? 2.5 : 0.8)}
-                className="cursor-pointer transition-all duration-300 hover:fill-slate-400/30"
-            />
-            {showCoords && q % 4 === 0 && r % 4 === 0 && !cell?.label && (
-                <text
-                    x={x} y={y}
-                    fontSize="5"
-                    textAnchor="middle"
-                    fill={isInIceZone ? "rgba(147, 197, 253, 0.3)" : (isInBlackSoil ? "rgba(68, 64, 60, 0.4)" : "rgba(14, 165, 233, 0.3)")}
-                    className="pointer-events-none select-none font-mono"
-                >
-                    {q},{r}
-                </text>
-            )}
-            {cell?.label && (
-                <text
-                    x={x} y={y + 5}
-                    fontSize="14"
-                    fontWeight="bold"
-                    textAnchor="middle"
-                    fill="white"
-                    className="pointer-events-none select-none drop-shadow-md"
-                >
-                    {cell.label}
-                </text>
-            )}
-            {cell?.isCenter && (
-                <g transform={`translate(${x - 8}, ${y - 8})`} className="pointer-events-none">
-                    {cell.type === 'hq' ? (
-                        <Home size={16} className="text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
-                    ) : (
-                        <Sword size={16} className="text-white animate-pulse" />
-                    )}
-                </g>
-            )}
-        </g>
-    );
-});
-
 const ToolBtn = ({ active, onClick, icon, label }) => (
-    <button
-        onClick={onClick}
-        title={label}
-        className={`p-2.5 rounded-md flex flex-col items-center gap-1 transition-all ${active ? 'bg-blue-600 text-white shadow-inner' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-            }`}
-    >
+    <button onClick={onClick} title={label}
+        className={`p-1.5 rounded-md transition-colors ${active ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-white'}`}>
         {icon}
+    </button>
+);
+const TabBtn = ({ active, onClick, icon, label, ac }) => (
+    <button onClick={onClick}
+        className={`px-2.5 py-1.5 rounded-md text-xs font-bold flex items-center gap-1 transition-colors ${active ? `${ac} text-white` : 'text-slate-400 hover:text-white'}`}>
+        {icon} {label}
     </button>
 );
