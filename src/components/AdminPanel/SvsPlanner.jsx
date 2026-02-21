@@ -658,7 +658,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                     </div>
                     <div className="h-6 w-px bg-slate-700" />
                     <div className="flex gap-1.5">
-                        {['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
+                        {['#ffffff', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
                             <button key={c} onClick={() => setColor(c)}
                                 className={`w-6 h-6 rounded-full border-2 ${color === c ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
                                 style={{ backgroundColor: c }} />
