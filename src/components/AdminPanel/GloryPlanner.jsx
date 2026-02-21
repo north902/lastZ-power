@@ -210,7 +210,7 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 ctx.fillText(cell.label, cx, cy + HEX_R * 1.2); ctx.shadowBlur = 0;
             }
         }
-        if (cell.type === 'building') {
+        if (cell.type === 'building' || cell.type === 'flex_building') {
             ctx.font = '10px serif'; ctx.fillText('⛺', cx, cy);
         }
     }
@@ -631,16 +631,22 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     nc[`${q + oq},${r + or}`] = { type: 'center', allianceId: aid, level: lv, color: alliance.color, parent: key, isCenter: oq === 0 && or === 0 };
                 });
                 setAlliances(p => p.map(a => a.id === aid ? { ...a, centers: { ...a.centers, [lv]: { q, r } } } : a));
-            } else if (t === 'building') {
-                if (!alliance) return prev;
-                const center = alliance.centers[lv];
-                if (!center) { showToast(`❌ 尚未放置 Lv${lv} 中心`); return prev; }
-                if (!isInZone(q, r, center.q, center.r)) return prev;
-                if (nc[key]) return prev;
-                const quota = getQuota(alliance, lv);
-                const used = countBuildings(aid, lv);
-                if (used >= quota) { showToast('❌ 配額已滿'); return prev; }
-                nc[key] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
+            } else if (t === 'building' || t === 'flex_building') {
+                if (t === 'building') {
+                    if (!alliance) return prev;
+                    const center = alliance.centers[lv];
+                    if (!center) { showToast(`❌ 尚未放置 Lv${lv} 中心`); return prev; }
+                    if (!isInZone(q, r, center.q, center.r)) return prev;
+                    if (nc[key]) return prev;
+                    const quota = getQuota(alliance, lv);
+                    const used = countBuildings(aid, lv);
+                    if (used >= quota) { showToast('❌ 配額已滿'); return prev; }
+                    nc[key] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
+                } else {
+                    // Flex building: no zone check, no quota check, but NO overlap
+                    if (nc[key]) return prev;
+                    nc[key] = { type: 'flex_building', allianceId: aid, level: lv, color: alliance?.color || '#94a3b8' };
+                }
             } else if (t === 'hq') {
                 const blocked = HQ_SHAPE.some(([oq, or]) => nc[`${q + oq},${r + or}`]);
                 if (blocked) return prev;
@@ -673,6 +679,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'hand'} onClick={() => setTool('hand')} icon={<Hand size={15} />} label="移動" />
                         <ToolBtn active={tool === 'center'} onClick={() => setTool('center')} icon={<Shield size={15} />} label="聯盟中心" />
                         <ToolBtn active={tool === 'building'} onClick={() => setTool('building')} icon="⛺" label="小建築" />
+                        <ToolBtn active={tool === 'flex_building'} onClick={() => setTool('flex_building')} icon="⛺✨" label="彈性建築(不限區域/配額)" />
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={15} />} label="總部" />
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
