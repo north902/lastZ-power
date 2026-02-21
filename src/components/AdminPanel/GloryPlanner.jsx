@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-    Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus,
+    Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
     Share2, Copy, Clock, Navigation, Image
 } from 'lucide-react';
@@ -214,6 +214,18 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             ctx.font = '10px serif'; ctx.fillText('⛺', cx, cy);
         }
     }
+    // Floating text
+    const TEXT_SIZES = { S: 14, M: 24, L: 36 };
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+    for (const key of Object.keys(cells)) {
+        if (!key.startsWith('text_')) continue;
+        const cell = cells[key];
+        const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
+        ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
+        ctx.fillText(cell.label, cell.x, cell.y);
+    }
+    ctx.shadowBlur = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -231,6 +243,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [showShared, setShowShared] = useState(false);
     const [sharedMaps, setSharedMaps] = useState([]);
     const [sharedLoading, setSharedLoading] = useState(false);
+    const [textColor, setTextColor] = useState('#ffffff');
+    const [textSize, setTextSize] = useState('M');
+    const [textInput, setTextInput] = useState(null);
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
@@ -240,7 +255,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const activeIdRef = useRef(null);
     const isDragging = useRef(false); const isPainting = useRef(false);
     const lastPos = useRef({ x: 0, y: 0 }); const dragStart = useRef({ x: 0, y: 0 });
-    const lastPaintHex = useRef(null);
+    const lastPaintHex = useRef(null); const draggingText = useRef(null);
+    const textColorRef = useRef('#ffffff'); const textSizeRef = useRef('M');
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
 
@@ -261,6 +277,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { toolLevelRef.current = toolLevel; }, [toolLevel]);
     useEffect(() => { activeIdRef.current = activeAllianceId; requestDraw(); }, [activeAllianceId]);
+    useEffect(() => { textColorRef.current = textColor; }, [textColor]);
+    useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
     useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
 
     // Quota helpers
@@ -415,7 +433,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             }
         }
         for (const key of Object.keys(cs)) {
+            if (key.startsWith('text_')) {
+                const t = cs[key];
+                minPx = Math.min(minPx, t.x - 100); maxPx = Math.max(maxPx, t.x + 100);
+                minPy = Math.min(minPy, t.y - 40); maxPy = Math.max(maxPy, t.y + 40);
+                continue;
+            }
             const [q, r] = key.split(',').map(Number);
+            if (isNaN(q) || isNaN(r)) continue;
             const [x, y] = hex2px(q, r);
             minPx = Math.min(minPx, x - HEX_R); maxPx = Math.max(maxPx, x + HEX_R);
             minPy = Math.min(minPy, y - HEX_R); maxPy = Math.max(maxPy, y + HEX_R);
@@ -497,6 +522,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
     const handleMouseDown = (e) => {
         dragStart.current = { x: e.clientX, y: e.clientY };
+        const [wx, wy] = getWorldPos(e);
+        if (toolRef.current === 'hand' && e.button === 0) {
+            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            if (hitText) {
+                draggingText.current = { id: hitText, startX: wx, startY: wy, ix: cellsRef.current[hitText].x, iy: cellsRef.current[hitText].y };
+                e.preventDefault(); return;
+            }
+        }
         if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
             isDragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
         } else if (e.button === 0 && (toolRef.current === 'building' || toolRef.current === 'eraser')) {
@@ -505,6 +538,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
     const handleMouseMove = (e) => {
         const [wx, wy] = getWorldPos(e);
+        if (draggingText.current) {
+            const dx = wx - draggingText.current.startX, dy = wy - draggingText.current.startY;
+            setCells(prev => ({ ...prev, [draggingText.current.id]: { ...prev[draggingText.current.id], x: draggingText.current.ix + dx, y: draggingText.current.iy + dy } }));
+            return;
+        }
         if (isDragging.current) {
             const dx = e.clientX - lastPos.current.x, dy = e.clientY - lastPos.current.y;
             lastPos.current = { x: e.clientX, y: e.clientY };
@@ -514,25 +552,38 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         if (isPainting.current) {
             const [q, r] = px2hex(wx, wy);
             const k = `${q},${r}`;
-            if (lastPaintHex.current !== k) { lastPaintHex.current = k; applyTool(q, r); }
+            if (lastPaintHex.current !== k) { lastPaintHex.current = k; applyTool(q, r, wx, wy); }
             return;
+        }
+        if (toolRef.current === 'hand') {
+            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            document.body.style.cursor = hitText ? 'move' : 'default';
         }
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
         if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
     };
-    const handleMouseUp = () => { isDragging.current = false; isPainting.current = false; lastPaintHex.current = null; };
+    const handleMouseUp = () => {
+        if (draggingText.current) { draggingText.current = null; return; }
+        isDragging.current = false; isPainting.current = false; lastPaintHex.current = null;
+    };
     const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
         if (Math.sqrt(dx * dx + dy * dy) > 4) return;
         if (e.button !== 0 || toolRef.current === 'hand') return;
         const [wx, wy] = getWorldPos(e);
         const [q, r] = px2hex(wx, wy);
-        applyTool(q, r);
+        applyTool(q, r, wx, wy);
     };
     const handleDoubleClick = (e) => {
         e.preventDefault();
         const [wx, wy] = getWorldPos(e);
+        const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+        if (hitText) {
+            const t = cellsRef.current[hitText];
+            setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
+            return;
+        }
         const [q, r] = px2hex(wx, wy);
         const cell = cellsRef.current[`${q},${r}`];
         if (cell?.isCenter && (cell.type === 'hq' || cell.type === 'center')) {
@@ -542,28 +593,34 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
     };
 
-    const applyTool = (q, r) => {
+    const applyTool = (q, r, wx, wy) => {
         const t = toolRef.current, lv = toolLevelRef.current, aid = activeIdRef.current;
         const alliance = alliancesRef.current.find(a => a.id === aid);
+        if (t === 'text') {
+            setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current, size: textSizeRef.current, editId: null });
+            return;
+        }
         setCells(prev => {
             const key = `${q},${r}`, nc = { ...prev };
             if (t === 'eraser') {
-                const tgt = nc[key];
-                if (tgt?.isCenter && tgt.type === 'center') {
-                    // Remove center + update alliance
-                    const shape = CENTER_SHAPE;
-                    shape.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
-                    setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
-                } else if (tgt?.parent && tgt.type === 'center') {
-                    // Clicked non-center part of center
-                    const [pq, pr] = tgt.parent.split(',').map(Number);
-                    CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
-                    setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
-                } else if (tgt?.parent && tgt.type === 'hq') {
-                    const [pq, pr] = tgt.parent.split(',').map(Number);
-                    HQ_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
-                } else {
-                    delete nc[key];
+                const textKey = Object.keys(nc).find(k => k.startsWith('text_') && Math.hypot(nc[k].x - wx, nc[k].y - wy) < 15);
+                if (textKey) { delete nc[textKey]; }
+                else {
+                    const tgt = nc[key];
+                    if (tgt?.isCenter && tgt.type === 'center') {
+                        const shape = CENTER_SHAPE;
+                        shape.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
+                        setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
+                    } else if (tgt?.parent && tgt.type === 'center') {
+                        const [pq, pr] = tgt.parent.split(',').map(Number);
+                        CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
+                        setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
+                    } else if (tgt?.parent && tgt.type === 'hq') {
+                        const [pq, pr] = tgt.parent.split(',').map(Number);
+                        HQ_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
+                    } else {
+                        delete nc[key];
+                    }
                 }
             } else if (t === 'center') {
                 if (!alliance) { showToast('❌ 請先選擇聯盟'); return prev; }
@@ -617,6 +674,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'center'} onClick={() => setTool('center')} icon={<Shield size={15} />} label="聯盟中心" />
                         <ToolBtn active={tool === 'building'} onClick={() => setTool('building')} icon="⛺" label="小建築" />
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={15} />} label="總部" />
+                        <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
                     </div>
                     {/* Level selector */}
@@ -629,6 +687,25 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 </button>
                             ))}
                         </div>
+                    )}
+                    {tool === 'text' && (
+                        <>
+                            <div className="flex gap-1.5">
+                                {['#ffffff', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
+                                    <button key={c} onClick={() => setTextColor(c)}
+                                        className={`w-5 h-5 rounded-full border-2 transition-transform ${textColor === c ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                                        style={{ backgroundColor: c }} />
+                                ))}
+                            </div>
+                            <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
+                                {[['S', '小'], ['M', '中'], ['L', '大']].map(([k, label]) => (
+                                    <button key={k} onClick={() => setTextSize(k)}
+                                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${textSize === k ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </>
                     )}
                     <div className="h-6 w-px bg-slate-700" />
                     <div className="flex bg-slate-800 rounded-lg p-1">
@@ -725,8 +802,44 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
                         onClick={handleClick} onDoubleClick={handleDoubleClick}
-                        onMouseLeave={() => { isDragging.current = false; isPainting.current = false; hoveredHex.current = null; requestDraw(); }}
+                        onMouseLeave={() => { isDragging.current = false; isPainting.current = false; draggingText.current = null; hoveredHex.current = null; requestDraw(); }}
                         onContextMenu={e => e.preventDefault()} />
+
+                    {textInput && (
+                        <input
+                            autoFocus
+                            defaultValue={textInput.val}
+                            style={{
+                                position: 'absolute',
+                                left: textInput.x * zoom + offsetRef.current.x,
+                                top: textInput.y * zoom + offsetRef.current.y,
+                                transform: 'translate(-50%, -50%)',
+                                color: textInput.color,
+                                fontSize: `${({ S: 14, M: 24, L: 36 }[textInput.size] || 24) * zoom}px`,
+                                textShadow: '0 0 4px black'
+                            }}
+                            className="bg-transparent border-b border-white outline-none text-center min-w-[100px] z-20 font-bold"
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                    const val = e.target.value.trim();
+                                    if (val) {
+                                        if (textInput.editId) {
+                                            setCells(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size } }));
+                                        } else {
+                                            setCells(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size } }));
+                                        }
+                                    } else if (textInput.editId) {
+                                        setCells(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
+                                    }
+                                    setTextInput(null);
+                                } else if (e.key === 'Escape') {
+                                    setTextInput(null);
+                                }
+                            }}
+                            onBlur={() => setTextInput(null)}
+                        />
+                    )}
+
                     {toast && <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">{toast}</div>}
 
                     {/* Shared maps modal */}
@@ -776,6 +889,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <p>💾 <b>Ctrl+S</b>：儲存 ┃ ↩️ <b>Ctrl+Z/Y</b>：復原</p>
                         <p>🏛️ <b>聯盟中心</b>：放置後自動產生 27×27 區域</p>
                         <p>⛺ <b>小建築</b>：拖曳快速佈置 ┃ 📁 <b>匯出/匯入</b></p>
+                        <p>🔤 <b>文字</b>：點擊放置標註 ┃ 雙擊編輯內容</p>
                     </div>
                 </div>
             </div>
