@@ -431,10 +431,11 @@ export const SvsPlanner = ({ isAdmin = false }) => {
             if (offsetRef.current.x === 0) offsetRef.current = { x: rect.width / 2, y: rect.height / 2 };
             requestDraw();
         };
-        resize();
+        // Small delay to let the DOM settle after switching from Glory
+        const timer = setTimeout(resize, 50);
         window.addEventListener('resize', resize);
-        return () => window.removeEventListener('resize', resize);
-    }, []);
+        return () => { clearTimeout(timer); window.removeEventListener('resize', resize); };
+    }, [mapMode]);
 
     useEffect(() => {
         const cont = containerRef.current; if (!cont) return;
