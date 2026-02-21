@@ -174,12 +174,14 @@ function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex) {
         }
     }
     // Render floating text
+    const TEXT_SIZES = { S: 14, M: 24, L: 36 };
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
     for (const key of Object.keys(cs)) {
         if (!key.startsWith('text_')) continue;
         const cell = cs[key];
-        ctx.font = 'bold 24px sans-serif'; ctx.fillStyle = cell.color || 'white';
+        const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
+        ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
         ctx.fillText(cell.label, cell.x, cell.y);
     }
     ctx.shadowBlur = 0;
@@ -216,7 +218,9 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const rafId = useRef(null);
     const dprRef = useRef(1);
     const draggingText = useRef(null);
-    const [textInput, setTextInput] = useState({ visible: false, x: 0, y: 0, val: '' });
+    const textSizeRef = useRef('M');
+    const [textSize, setTextSize] = useState('M');
+    const [textInput, setTextInput] = useState(null);
 
     // History
     const historyRef = useRef([{}]);
@@ -241,6 +245,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { colorRef.current = color; }, [color]);
+    useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
 
     // --- localStorage save/load ---
     const sKey = (m) => `svs_planner_${m}`;
@@ -543,6 +548,12 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const handleDoubleClick = (e) => {
         e.preventDefault();
         const [wx, wy] = getWorldPos(e);
+        const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+        if (hitText) {
+            const t = cellsRef.current[hitText];
+            setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
+            return;
+        }
         const [q, r] = px2hex(wx, wy);
         const key = `${q},${r}`;
         const cell = cellsRef.current[key];
@@ -586,7 +597,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                 }
             }
             else if (t === 'text') {
-                setTextInput({ visible: true, x: wx, y: wy, val: '', color: c });
+                setTextInput({ x: wx, y: wy, val: '', color: c, size: textSizeRef.current, editId: null });
             }
             else if (t === 'eraser') {
                 // Earle floating text first
@@ -653,6 +664,16 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                                 style={{ backgroundColor: c }} />
                         ))}
                     </div>
+                    {tool === 'text' && (
+                        <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
+                            {[['S', '小'], ['M', '中'], ['L', '大']].map(([k, label]) => (
+                                <button key={k} onClick={() => setTextSize(k)}
+                                    className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${textSize === k ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                    {label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <div className="h-6 w-px bg-slate-700" />
                     <div className="flex bg-slate-800 rounded-lg p-1">
                         <ToolBtn onClick={undo} icon={<Undo2 size={15} />} label="復原 Ctrl+Z" />
@@ -696,19 +717,20 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                 <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                     onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
                     onClick={handleClick} onDoubleClick={handleDoubleClick}
-                    onMouseLeave={() => { isDragging.current = false; hoveredHex.current = null; requestDraw(); }}
+                    onMouseLeave={() => { isDragging.current = false; draggingText.current = null; hoveredHex.current = null; requestDraw(); }}
                     onContextMenu={e => e.preventDefault()} />
 
-                {textInput.visible && (
+                {textInput && (
                     <input
                         autoFocus
+                        defaultValue={textInput.val}
                         style={{
                             position: 'absolute',
                             left: textInput.x * zoom + offsetRef.current.x,
                             top: textInput.y * zoom + offsetRef.current.y,
                             transform: 'translate(-50%, -50%)',
                             color: textInput.color,
-                            fontSize: `${24 * zoom}px`,
+                            fontSize: `${({ S: 14, M: 24, L: 36 }[textInput.size] || 24) * zoom}px`,
                             textShadow: '0 0 4px black'
                         }}
                         className="bg-transparent border-b border-white outline-none text-center min-w-[100px] z-20 font-bold"
@@ -716,14 +738,20 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                             if (e.key === 'Enter') {
                                 const val = e.target.value.trim();
                                 if (val) {
-                                    setCells(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color } }));
+                                    if (textInput.editId) {
+                                        setCells(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size } }));
+                                    } else {
+                                        setCells(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size } }));
+                                    }
+                                } else if (textInput.editId) {
+                                    setCells(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
                                 }
-                                setTextInput({ visible: false, x: 0, y: 0, val: '' });
+                                setTextInput(null);
                             } else if (e.key === 'Escape') {
-                                setTextInput({ visible: false, x: 0, y: 0, val: '' });
+                                setTextInput(null);
                             }
                         }}
-                        onBlur={() => setTextInput({ visible: false, x: 0, y: 0, val: '' })}
+                        onBlur={() => setTextInput(null)}
                     />
                 )}
 
