@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     MousePointer2, Trash2, Download, ZoomIn, ZoomOut, Maximize,
     Map as MapIcon, Sword, Home, Navigation, Fish, Hand, Pen, Type,
-    Undo2, Redo2, Save, Upload, Share2, Copy, X, Clock
+    Undo2, Redo2, Save, Upload, Share2, Copy, X, Clock, Shield
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { GloryPlanner } from './GloryPlanner';
 
 // ═══════════════════════════════════════════════════════════════
 //  Constants
@@ -359,8 +360,12 @@ export const SvsPlanner = ({ isAdmin = false }) => {
 
     const switchMap = (mode) => {
         if (mode === mapMode) return;
-        // Save current map to localStorage
-        localStorage.setItem(sKey(mapModeRef.current), JSON.stringify({ cells: cellsRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        // Save current map to localStorage (only for svs/fishpond)
+        if (mapModeRef.current !== 'glory') {
+            localStorage.setItem(sKey(mapModeRef.current), JSON.stringify({ cells: cellsRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        }
+        // Glory mode is handled by its own component
+        if (mode === 'glory') { setMapMode('glory'); return; }
         // Immediately sync refs BEFORE any drawing/loading
         mapModeRef.current = mode;
         setMapMode(mode); setTool('hand');
@@ -615,6 +620,11 @@ export const SvsPlanner = ({ isAdmin = false }) => {
 
     const cursorClass = tool === 'hand' ? '' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
 
+    // Glory mode: render dedicated component
+    if (mapMode === 'glory') {
+        return <GloryPlanner onSwitchMap={switchMap} isAdmin={isAdmin} />;
+    }
+
     return (
         <div className="flex flex-col h-[calc(100vh-200px)] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
             {/* Toolbar */}
@@ -623,6 +633,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                     <div className="flex bg-slate-800 rounded-lg p-1">
                         <TabBtn active={mapMode === 'svs'} onClick={() => switchMap('svs')} icon={<MapIcon size={14} />} label="SVS" ac="bg-blue-600" />
                         <TabBtn active={mapMode === 'fishpond'} onClick={() => switchMap('fishpond')} icon={<Fish size={14} />} label="魚池" ac="bg-rose-600" />
+                        <TabBtn active={false} onClick={() => switchMap('glory')} icon={<Shield size={14} />} label="榮耀" ac="bg-amber-600" />
                     </div>
                     <div className="h-6 w-px bg-slate-700" />
                     <div className="flex bg-slate-800 rounded-lg p-1">
