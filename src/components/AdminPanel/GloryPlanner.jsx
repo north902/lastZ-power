@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus,
-    Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X
+    Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
+    Share2, Copy, Clock, Navigation, Image
 } from 'lucide-react';
+import { db } from '../../config/firebase';
+import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
 // ═══════════════════════════════════════════════════════════════
 //  Hex Math & Constants
@@ -79,7 +82,7 @@ const getZoneBounds = (cq, cr) => {
 // ═══════════════════════════════════════════════════════════════
 //  Draw
 // ═══════════════════════════════════════════════════════════════
-function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds) {
+function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false) {
     const { left, right, top, bottom } = viewBounds;
     // Collect zones
     const zones = [];
@@ -167,6 +170,23 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds) {
         const aName = alliances.find(a => a.id === z.aid)?.name || '';
         ctx.fillText(`${aName} Lv${z.lv}`, leftX + 8, topY - 4);
     }
+    // Coordinate labels
+    if (showCoords) {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        for (let r2 = rMin; r2 <= rMax; r2++) {
+            const xOff2 = HEX_R * S3 / 2 * r2;
+            const qMin3 = Math.floor((left - xOff2 - HEX_R * 2) / (HEX_R * S3));
+            const qMax3 = Math.ceil((right - xOff2 + HEX_R * 2) / (HEX_R * S3));
+            for (let q2 = qMin3; q2 <= qMax3; q2++) {
+                if (q2 % 5 !== 0 || r2 % 5 !== 0) continue;
+                const k2 = `${q2},${r2}`;
+                if (cells[k2]) continue;
+                const [cx2, cy2] = hex2px(q2, r2);
+                ctx.font = '5px monospace'; ctx.fillStyle = 'rgba(100,180,255,0.35)';
+                ctx.fillText(k2, cx2, cy2);
+            }
+        }
+    }
     // Labels & icons on cells
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const [key, cell] of Object.entries(cells)) {
@@ -207,9 +227,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [toolLevel, setToolLevel] = useState(1);
     const [zoom, setZoom] = useState(0.5);
     const [toast, setToast] = useState('');
+    const [showCoords, setShowCoords] = useState(false);
+    const [showShared, setShowShared] = useState(false);
+    const [sharedMaps, setSharedMaps] = useState([]);
+    const [sharedLoading, setSharedLoading] = useState(false);
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
+    const showCoordsRef = useRef(false);
     const cellsRef = useRef({}); const alliancesRef = useRef([]);
     const toolRef = useRef('hand'); const toolLevelRef = useRef(1);
     const activeIdRef = useRef(null);
@@ -236,6 +261,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { toolLevelRef.current = toolLevel; }, [toolLevel]);
     useEffect(() => { activeIdRef.current = activeAllianceId; requestDraw(); }, [activeAllianceId]);
+    useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
 
     // Quota helpers
     const getQuota = (alliance, lv) => alliance.centers[lv] ? alliance.memberCount * LEVEL_MULTI[lv] : 0;
@@ -337,6 +363,84 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         input.click();
     };
 
+    // --- Firestore cloud sharing (admin only) ---
+    const publishToCloud = async () => {
+        const title = prompt('請輸入共享地圖標題：', '榮耀之戰規劃圖');
+        if (!title) return;
+        try {
+            const id = `glory_${Date.now()}`;
+            await setDoc(doc(db, 'shared_maps', id), {
+                title, mapMode: 'glory',
+                cells: cellsRef.current, alliances: alliancesRef.current,
+                publishedAt: serverTimestamp(),
+            });
+            showToast('☁️ 已發佈到共享區！');
+        } catch (err) { showToast('❌ 發佈失敗：' + err.message); }
+    };
+    const loadSharedList = async () => {
+        setSharedLoading(true);
+        try {
+            const q2 = query(collection(db, 'shared_maps'), orderBy('publishedAt', 'desc'));
+            const snap = await getDocs(q2);
+            setSharedMaps(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(m => m.mapMode === 'glory'));
+        } catch { showToast('❌ 讀取失敗'); }
+        setSharedLoading(false);
+    };
+    const copySharedMap = (map) => {
+        if (map.cells) { skipHistory.current = true; setCells(JSON.parse(JSON.stringify(map.cells))); }
+        if (map.alliances) { setAlliances(map.alliances); setActiveAllianceId(map.alliances[0]?.id || null); }
+        historyRef.current = [JSON.parse(JSON.stringify(map.cells || {}))]; historyIdx.current = 0;
+        centerMap(); setShowShared(false);
+        showToast(`📋 已複製: ${map.title}`);
+    };
+    const deleteSharedMap = async (id) => {
+        if (!window.confirm('確定刪除此共享地圖？')) return;
+        await deleteDoc(doc(db, 'shared_maps', id));
+        setSharedMaps(prev => prev.filter(m => m.id !== id));
+        showToast('🗑️ 已刪除');
+    };
+
+    // --- Full-map PNG export ---
+    const exportImage = () => {
+        const as = alliancesRef.current;
+        const cs = cellsRef.current;
+        // Compute bounding box of all zones + cells
+        let minPx = Infinity, maxPx = -Infinity, minPy = Infinity, maxPy = -Infinity;
+        for (const a of as) {
+            for (const lv of [1, 2, 3]) {
+                const c = a.centers[lv]; if (!c) continue;
+                const b = getZoneBounds(c.q, c.r);
+                minPx = Math.min(minPx, b.left); maxPx = Math.max(maxPx, b.right);
+                minPy = Math.min(minPy, b.top); maxPy = Math.max(maxPy, b.bottom);
+            }
+        }
+        for (const key of Object.keys(cs)) {
+            const [q, r] = key.split(',').map(Number);
+            const [x, y] = hex2px(q, r);
+            minPx = Math.min(minPx, x - HEX_R); maxPx = Math.max(maxPx, x + HEX_R);
+            minPy = Math.min(minPy, y - HEX_R); maxPy = Math.max(maxPy, y + HEX_R);
+        }
+        if (!isFinite(minPx)) { showToast('❌ 地圖為空'); return; }
+        const padding = HEX_R * 4;
+        const w = (maxPx - minPx) + padding * 2;
+        const h = (maxPy - minPy) + padding * 2;
+        const centerX = (minPx + maxPx) / 2;
+        const centerY = (minPy + maxPy) / 2;
+        const tmpCanvas = document.createElement('canvas');
+        tmpCanvas.width = w * 2; tmpCanvas.height = h * 2;
+        const tCtx = tmpCanvas.getContext('2d');
+        tCtx.scale(2, 2);
+        tCtx.fillStyle = '#0f172a'; tCtx.fillRect(0, 0, w, h);
+        tCtx.translate(w / 2 - centerX, h / 2 - centerY);
+        const exportBounds = { left: centerX - w / 2, right: centerX + w / 2, top: centerY - h / 2, bottom: centerY + h / 2 };
+        drawGloryMap(tCtx, cs, as, null, null, exportBounds, false);
+        const link = document.createElement('a');
+        link.download = `glory-map-${new Date().toISOString().slice(0, 10)}.png`;
+        link.href = tmpCanvas.toDataURL('image/png');
+        link.click();
+        showToast('📸 已匯出完整地圖！');
+    };
+
     // Canvas setup
     const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
     useEffect(() => {
@@ -382,7 +486,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             left: -offsetRef.current.x / z, right: (rect.width - offsetRef.current.x) / z,
             top: -offsetRef.current.y / z, bottom: (rect.height - offsetRef.current.y) / z
         };
-        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds);
+        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current);
         ctx.restore();
     };
 
@@ -546,6 +650,19 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     <div className="h-6 w-px bg-slate-700" />
                     <button onClick={exportJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-cyan-400 border border-slate-700" title="匯出 JSON"><Download size={13} /></button>
                     <button onClick={importJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-yellow-400 border border-slate-700" title="匯入 JSON"><Upload size={13} /></button>
+                    {isAdmin && <>
+                        <button onClick={publishToCloud} title="發佈到共享區" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-violet-400 border border-slate-700"><Share2 size={13} /></button>
+                        <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="px-2 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold">
+                            ☁️ 共享
+                        </button>
+                    </>}
+                    <div className="h-6 w-px bg-slate-700" />
+                    <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                        <Navigation size={12} /> 座標
+                    </button>
+                    <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-amber-500">
+                        📸 匯出圖片
+                    </button>
                 </div>
             </div>
 
@@ -611,6 +728,55 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         onMouseLeave={() => { isDragging.current = false; isPainting.current = false; hoveredHex.current = null; requestDraw(); }}
                         onContextMenu={e => e.preventDefault()} />
                     {toast && <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">{toast}</div>}
+
+                    {/* Shared maps modal */}
+                    {showShared && (
+                        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                            <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-[500px] max-h-[80%] flex flex-col overflow-hidden">
+                                <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+                                    <h3 className="text-white font-bold flex items-center gap-2">☁️ 榮耀共享地圖</h3>
+                                    <button onClick={() => setShowShared(false)} className="text-slate-400 hover:text-white"><X size={18} /></button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                                    {sharedLoading ? (
+                                        <p className="text-center text-slate-500 py-8">載入中...</p>
+                                    ) : sharedMaps.length === 0 ? (
+                                        <p className="text-center text-slate-500 py-8">尚無共享地圖</p>
+                                    ) : sharedMaps.map(m => (
+                                        <div key={m.id} className="bg-slate-800 rounded-xl p-3 flex items-center justify-between border border-slate-700 hover:border-slate-600 transition-colors">
+                                            <div>
+                                                <p className="text-white font-bold text-sm">{m.title}</p>
+                                                <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
+                                                    <span className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-400">榮耀</span>
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock size={10} />
+                                                        {m.publishedAt?.toDate?.()?.toLocaleString('zh-TW')?.slice(0, 16) || '—'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <button onClick={() => copySharedMap(m)} className="px-2.5 py-1.5 bg-amber-600 text-white rounded-lg text-[10px] font-bold hover:bg-amber-500 flex items-center gap-1">
+                                                    <Copy size={12} /> 複製
+                                                </button>
+                                                <button onClick={() => deleteSharedMap(m.id)} className="p-1.5 text-slate-500 hover:text-red-400 rounded-lg hover:bg-red-900/20">
+                                                    <Trash2 size={13} />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Legend */}
+                    <div className="absolute bottom-4 right-4 bg-slate-900/70 backdrop-blur border border-slate-700 p-3 rounded-xl pointer-events-none text-[10px] text-slate-400 space-y-1">
+                        <h4 className="text-amber-400 font-bold text-xs uppercase tracking-widest mb-1.5">操作指南</h4>
+                        <p>✋ <b>手掌</b>：拖曳 ┃ 🔄 <b>滾輪</b>：縮放</p>
+                        <p>💾 <b>Ctrl+S</b>：儲存 ┃ ↩️ <b>Ctrl+Z/Y</b>：復原</p>
+                        <p>🏛️ <b>聯盟中心</b>：放置後自動產生 27×27 區域</p>
+                        <p>⛺ <b>小建築</b>：拖曳快速佈置 ┃ 📁 <b>匯出/匯入</b></p>
+                    </div>
                 </div>
             </div>
         </div>
