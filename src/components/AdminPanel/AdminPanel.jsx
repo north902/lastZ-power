@@ -588,12 +588,14 @@ const AdminPanel = ({ forcePlanner = false }) => {
           )}
         </div>
 
-        <div className="p-4 bg-gray-50/50 border-t border-gray-100 text-[9px] font-black text-gray-300 uppercase tracking-[0.2em] flex justify-between items-center">
-          <span>{t('intel_v2')}</span>
-          <span className="bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-400">
-            {viewMode === 'alliances' ? t('alliance_label') : t('data_count')}: {viewMode === 'alliances' ? allianceStats.length : processedUsers.length}
-          </span>
-        </div>
+        {viewMode !== 'planner' && !forcePlanner && (
+          <div className="p-4 bg-gray-50/50 border-t border-gray-100 text-[9px] font-black text-gray-300 uppercase tracking-[0.2em] flex justify-between items-center">
+            <span>{t('intel_v2')}</span>
+            <span className="bg-white px-2 py-0.5 rounded border border-gray-200 text-gray-400">
+              {viewMode === 'alliances' ? t('alliance_label') : t('data_count')}: {viewMode === 'alliances' ? allianceStats.length : processedUsers.length}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
