@@ -461,8 +461,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const addAlliance = () => {
         const name = prompt('聯盟名稱（例如 [KTX]）：');
         if (!name?.trim()) return;
-        const usedColors = alliances.map(a => a.color);
-        const color = ALLIANCE_COLORS.find(c => !usedColors.includes(c)) || ALLIANCE_COLORS[0];
+        const color = ALLIANCE_COLORS[alliances.length % ALLIANCE_COLORS.length];
         const id = `a_${Date.now()}`;
         const newA = { id, name: name.trim(), color, memberCount: 30, centers: { 1: null, 2: null, 3: null } };
         setAlliances(prev => [...prev, newA]);
@@ -481,6 +480,24 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
     const updateMemberCount = (id, count) => {
         setAlliances(prev => prev.map(a => a.id === id ? { ...a, memberCount: Math.max(1, parseInt(count) || 1) } : a));
+    };
+    const updateAllianceName = (id, newName) => {
+        if (!newName?.trim()) return;
+        setAlliances(prev => prev.map(a => a.id === id ? { ...a, name: newName.trim() } : a));
+    };
+    const updateAllianceColor = (id, newColor) => {
+        setAlliances(prev => prev.map(a => a.id === id ? { ...a, color: newColor } : a));
+        setCells(prev => {
+            const nc = { ...prev };
+            let changed = false;
+            Object.keys(nc).forEach(k => {
+                if (nc[k] && nc[k].allianceId === id && nc[k].color !== newColor) {
+                    nc[k] = { ...nc[k], color: newColor };
+                    changed = true;
+                }
+            });
+            return changed ? nc : prev;
+        });
     };
 
     const autoFillZone = (aid, lv) => {
@@ -1122,8 +1139,21 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 className={`rounded-xl p-2.5 cursor-pointer border transition-all ${isActive ? 'border-white/30 bg-slate-800/80 shadow-lg' : 'border-slate-700/50 bg-slate-900/50 opacity-60 hover:opacity-100'}`}>
                                 <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-2">
-                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: a.color }} />
-                                        <span className="text-white text-xs font-bold">{a.name}</span>
+                                        <label className="w-3.5 h-3.5 rounded-full cursor-pointer flex-shrink-0 relative overflow-hidden border border-slate-600 hover:border-white transition-colors shadow-sm" title="自訂顏色" onClick={e => e.stopPropagation()}>
+                                            <input type="color" value={a.color} onChange={e => updateAllianceColor(a.id, e.target.value)} className="absolute inset-0 opacity-0 w-[200%] h-[200%] -top-1/2 -left-1/2 cursor-pointer" />
+                                            <div className="w-full h-full pointer-events-none" style={{ backgroundColor: a.color }} />
+                                        </label>
+                                        <span
+                                            className="text-white text-xs font-bold cursor-text hover:text-amber-400 truncate max-w-[100px] transition-colors"
+                                            title="點擊修改名稱"
+                                            onClick={e => {
+                                                e.stopPropagation();
+                                                const newName = prompt('修改聯盟名稱：', a.name);
+                                                if (newName) updateAllianceName(a.id, newName);
+                                            }}
+                                        >
+                                            {a.name}
+                                        </span>
                                     </div>
                                     <button onClick={(e) => { e.stopPropagation(); removeAlliance(a.id); }} className="text-slate-500 hover:text-red-400"><X size={12} /></button>
                                 </div>
