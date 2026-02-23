@@ -521,7 +521,8 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         const onWheel = (e) => { e.preventDefault(); zoomRef.current = Math.min(3, Math.max(0.15, zoomRef.current + (e.deltaY > 0 ? -0.08 : 0.08))); setZoom(zoomRef.current); requestDraw(); };
         cont.addEventListener('wheel', onWheel, { passive: false });
         return () => cont.removeEventListener('wheel', onWheel);
-    }, []);
+    }, [mapMode]);
+
 
     useEffect(() => {
         const onKey = (e) => {
