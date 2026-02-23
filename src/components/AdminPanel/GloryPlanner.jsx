@@ -1377,7 +1377,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                     <section>
                                         <h4 className="text-amber-500 font-bold mb-2 flex items-center gap-2"><Navigation size={16} /> 五、 常用快捷與操作技巧</h4>
                                         <ul className="list-disc pl-5 space-y-1 text-slate-400">
-                                            <li><strong className="text-slate-200">平移圖板</strong>：游標為「✋ 移動」狀態時可長按左鍵拖曳；或在任何工具下<strong className="text-white">按住滑鼠中鍵(滾輪)</strong>拖曳。</li>
+                                            <li><strong className="text-slate-200">平移圖板</strong>：游標為「✋ 移動」狀態時可長按左鍵拖曳；或在任何工具下<strong className="text-white">按住滑鼠右鍵</strong>拖曳。</li>
                                             <li><strong className="text-slate-200">縮放與置中</strong>：滑鼠滾輪上下滾動可縮放；點擊工具列「置中」按鈕可一鍵將畫布移回中心點。</li>
                                             <li><strong className="text-slate-200">復原與重做</strong>：誤觸時可點擊復原按鈕，或使用快捷鍵 <strong className="text-white">Ctrl + Z</strong> (復原) 與 <strong className="text-white">Ctrl + Y</strong> (重做)。</li>
                                             <li><strong className="text-slate-200">重設畫布</strong>：點擊「重設」垃圾桶按鈕會清空畫布與所有聯盟配置，請小心使用。</li>
