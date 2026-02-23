@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     MousePointer2, Trash2, Download, ZoomIn, ZoomOut, Maximize,
-    Map as MapIcon, Sword, Home, Navigation, Fish, Hand, Pen, Type,
+    Map as MapIcon, Sword, Home, MapPin, Navigation, Fish, Hand, Pen, Type,
     Undo2, Redo2, Save, Upload, Share2, Copy, X, Clock, Shield
 } from 'lucide-react';
 import { db } from '../../config/firebase';
@@ -152,27 +152,37 @@ function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex, tool = 'hand', c
     }
     // Labels & icons
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 3;
     for (let q = -radius; q <= radius; q++) {
         for (let r = -radius; r <= radius; r++) {
             if (Math.abs(-q - r) > radius) continue;
             const key = `${q},${r}`, cell = cs[key], [cx, cy] = hex2px(q, r);
-            if (showCoords && q % 5 === 0 && r % 5 === 0 && !cell?.label) {
-                ctx.font = '5px monospace'; ctx.fillStyle = 'rgba(100,180,255,0.35)';
-                ctx.fillText(`${q},${r}`, cx, cy);
+            if (showCoords && !cell?.label) {
+                // If calibrated, show actual game coords, else relative q,r
+                let text = `${q},${r}`;
+                if (cs.origin) {
+                    const q0 = cs.origin.q, r0 = cs.origin.r, x0 = cs.origin.x, y0 = cs.origin.y;
+                    const gy = r - r0 + y0;
+                    const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+                    text = `${gx},${gy}`;
+                }
+                ctx.font = '7px sans-serif'; ctx.fillStyle = 'rgba(100,180,255,0.45)';
+                ctx.fillText(text, cx, cy);
             }
             if (cell?.label) {
                 const fontSize = cell.type === 'text' ? 12 : 14;
                 ctx.font = `bold ${fontSize}px sans-serif`; ctx.fillStyle = 'white';
-                ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 4;
+
                 // HQ label
                 const labelY = cy + HEX_R * 0.8;
-                ctx.fillText(cell.label, cx, labelY); ctx.shadowBlur = 0;
+                ctx.fillText(cell.label, cx, labelY);
             }
             if (cell?.isCenter && cell.type === 'hq') { ctx.font = '14px serif'; ctx.fillText('🏠', cx, cy); }
             if (cell?.isCenter && cell.type === 'cannon') { ctx.font = '14px serif'; ctx.fillText('⚔️', cx, cy); }
             if (mode === 'fishpond' && q === 0 && r === 0 && !cell) { ctx.font = '20px serif'; ctx.fillText('🐉', cx, cy); }
         }
     }
+    ctx.shadowBlur = 0;
     // Floating ghost for placement (Hover preview)
     if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'border' && tool !== 'text') {
         const [hq, hr] = hoveredHex;
@@ -274,6 +284,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const textSizeRef = useRef('M');
     const [textSize, setTextSize] = useState('M');
     const [textInput, setTextInput] = useState(null);
+    const [originInput, setOriginInput] = useState(null);
 
     // History
     const historyRef = useRef([{}]);
@@ -609,6 +620,13 @@ export const SvsPlanner = ({ isAdmin = false }) => {
             return;
         }
         const [q, r] = px2hex(wx, wy);
+
+        // Edit Origin directly on double click if tool is origin
+        if (toolRef.current === 'origin') {
+            setOriginInput({ q, r });
+            return;
+        }
+
         const key = `${q},${r}`;
         const cell = cellsRef.current[key];
         // Only allow renaming HQ center cells
@@ -633,6 +651,10 @@ export const SvsPlanner = ({ isAdmin = false }) => {
             const key = `${q},${r}`, nc = { ...prev };
             if (mode === 'fishpond' && DRAGON_ZONE.has(key) && t !== 'eraser') return prev;
             if (t === 'brush') nc[key] = { type: 'color', color: c };
+            else if (t === 'origin') {
+                setOriginInput({ q, r });
+                return prev;
+            }
             else if (t === 'border') {
                 // Detect which edge was clicked based on angle from hex center
                 const [cx, cy] = hex2px(q, r);
@@ -707,6 +729,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={16} />} label="總部" />
                         {mapMode === 'svs' && <ToolBtn active={tool === 'cannon'} onClick={() => setTool('cannon')} icon={<Sword size={16} />} label="哨塔" />}
                         <ToolBtn active={tool === 'border'} onClick={() => setTool('border')} icon={<Pen size={16} />} label="邊界" />
+                        <ToolBtn active={tool === 'origin'} onClick={() => setTool('origin')} icon={<MapPin size={16} />} label="坐標校正 (點擊格子設為原點)" />
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={16} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={16} />} label="橡皮擦" />
                     </div>
@@ -807,6 +830,40 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                         }}
                         onBlur={() => setTextInput(null)}
                     />
+                )}
+
+                {/* Origin Input Box */}
+                {originInput && (
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl z-30 flex flex-col gap-3 min-w-[250px]">
+                        <h3 className="text-white text-sm font-bold flex items-center gap-2"><MapPin size={16} className="text-blue-400" /> 校正遊戲對應座標</h3>
+                        <p className="text-[10px] text-slate-400">請輸入此格在遊戲地圖上的真實 (X, Y) 座標：</p>
+                        <form onSubmit={(e) => {
+                            e.preventDefault();
+                            const x = parseInt(e.target.x.value, 10);
+                            const y = parseInt(e.target.y.value, 10);
+                            if (!isNaN(x) && !isNaN(y)) {
+                                setCells(prev => ({ ...prev, origin: { q: originInput.q, r: originInput.r, x, y } }));
+                                showToast(`📍 座標已校正為 (${x}, ${y})`);
+                                setShowCoords(true);
+                            }
+                            setOriginInput(null);
+                        }} className="flex gap-2 text-sm justify-between">
+                            <input name="x" type="number" placeholder="X" required className="w-20 px-2 py-1 bg-slate-800 text-white rounded border border-slate-700 outline-none focus:border-blue-500" autoFocus />
+                            <input name="y" type="number" placeholder="Y" required className="w-20 px-2 py-1 bg-slate-800 text-white rounded border border-slate-700 outline-none focus:border-blue-500" />
+                            <div className="flex gap-1 ml-auto">
+                                <button type="button" onClick={() => setOriginInput(null)} className="px-3 bg-slate-700 hover:bg-slate-600 text-white rounded font-bold">X</button>
+                                <button type="submit" className="px-3 bg-blue-600 hover:bg-blue-500 text-white rounded font-bold">確定</button>
+                            </div>
+                        </form>
+                        {cells.origin && (
+                            <button onClick={() => {
+                                setCells(prev => { const nc = { ...prev }; delete nc.origin; return nc; });
+                                setOriginInput(null); showToast('🗑️ 已移除自訂座標原點');
+                            }} className="mt-1 text-[10px] text-red-500 hover:text-red-400 self-end uppercase">
+                                清除座標基準點
+                            </button>
+                        )}
+                    </div>
                 )}
 
                 {toast && (

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
-    Share2, Copy, Clock, Navigation, Image
+    Share2, Copy, Clock, Navigation, MapPin, MousePointer2
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -190,12 +190,19 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             const qMin3 = Math.floor((left - xOff2 - HEX_R * 2) / (HEX_R * S3));
             const qMax3 = Math.ceil((right - xOff2 + HEX_R * 2) / (HEX_R * S3));
             for (let q2 = qMin3; q2 <= qMax3; q2++) {
-                if (q2 % 5 !== 0 || r2 % 5 !== 0) continue;
                 const k2 = `${q2},${r2}`;
-                if (cells[k2]) continue;
-                const [cx2, cy2] = hex2px(q2, r2);
-                ctx.font = '5px monospace'; ctx.fillStyle = 'rgba(100,180,255,0.35)';
-                ctx.fillText(k2, cx2, cy2);
+                if (!cells[k2]) {
+                    const [cx2, cy2] = hex2px(q2, r2);
+                    let text = `${q2},${r2}`;
+                    if (cells.origin) {
+                        const q0 = cells.origin.q, r0 = cells.origin.r, x0 = cells.origin.x, y0 = cells.origin.y;
+                        const gy = r2 - r0 + y0;
+                        const gx = q2 - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+                        text = `${gx},${gy}`;
+                    }
+                    ctx.font = '7px monospace'; ctx.fillStyle = 'rgba(100,180,255,0.45)';
+                    ctx.fillText(text, cx2, cy2);
+                }
             }
         }
     }
@@ -340,6 +347,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [textColor, setTextColor] = useState(null);
     const [textSize, setTextSize] = useState('M');
     const [textInput, setTextInput] = useState(null);
+    const [originInput, setOriginInput] = useState(null);
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
@@ -679,7 +687,15 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
             return;
         }
+
         const [q, r] = px2hex(wx, wy);
+
+        // Edit Origin directly if tool is origin
+        if (toolRef.current === 'origin') {
+            setOriginInput({ q, r });
+            return;
+        }
+
         const cell = cellsRef.current[`${q},${r}`];
         if (cell?.isCenter && (cell.type === 'hq' || cell.type === 'center')) {
             const name = prompt('輸入名稱（留空清除）', cell.label || '');
@@ -741,6 +757,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     nc[`${q + oq},${r + or}`] = { type: 'center', allianceId: aid, level: lv, color: alliance.color, parent: key, isCenter: oq === 0 && or === 0 };
                 });
                 setAlliances(p => p.map(a => a.id === aid ? { ...a, centers: { ...a.centers, [lv]: { q, r } } } : a));
+            } else if (t === 'origin') {
+                setOriginInput({ q, r });
             } else if (t === 'building' || t === 'flex_building') {
                 if (t === 'building') {
                     if (!alliance) return prev;
@@ -791,6 +809,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'building'} onClick={() => setTool('building')} icon="⛺" label="小建築" />
                         <ToolBtn active={tool === 'flex_building'} onClick={() => setTool('flex_building')} icon="⛺✨" label="彈性建築(不限區域/配額)" />
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={15} />} label="總部" />
+                        <ToolBtn active={tool === 'origin'} onClick={() => setTool('origin')} icon={<MapPin size={15} />} label="坐標校正" />
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
                     </div>
@@ -968,6 +987,40 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                             }}
                             onBlur={() => setTextInput(null)}
                         />
+                    )}
+
+                    {/* Origin Input Box */}
+                    {originInput && (
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl z-30 flex flex-col gap-3 min-w-[250px]">
+                            <h3 className="text-white text-sm font-bold flex items-center gap-2"><MapPin size={16} className="text-amber-400" /> 校正遊戲對應座標</h3>
+                            <p className="text-[10px] text-slate-400">請輸入此格在遊戲地圖上的真實 (X, Y) 座標：</p>
+                            <form onSubmit={(e) => {
+                                e.preventDefault();
+                                const x = parseInt(e.target.x.value, 10);
+                                const y = parseInt(e.target.y.value, 10);
+                                if (!isNaN(x) && !isNaN(y)) {
+                                    setCells(prev => ({ ...prev, origin: { q: originInput.q, r: originInput.r, x, y } }));
+                                    showToast(`📍 座標已校正為 (${x}, ${y})`);
+                                    setShowCoords(true);
+                                }
+                                setOriginInput(null);
+                            }} className="flex gap-2 text-sm justify-between">
+                                <input name="x" type="number" placeholder="X" required className="w-20 px-2 py-1 bg-slate-800 text-white rounded border border-slate-700 outline-none focus:border-amber-500" autoFocus />
+                                <input name="y" type="number" placeholder="Y" required className="w-20 px-2 py-1 bg-slate-800 text-white rounded border border-slate-700 outline-none focus:border-amber-500" />
+                                <div className="flex gap-1 ml-auto">
+                                    <button type="button" onClick={() => setOriginInput(null)} className="px-3 bg-slate-700 hover:bg-slate-600 text-white rounded font-bold">X</button>
+                                    <button type="submit" className="px-3 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold">確定</button>
+                                </div>
+                            </form>
+                            {cells.origin && (
+                                <button onClick={() => {
+                                    setCells(prev => { const nc = { ...prev }; delete nc.origin; return nc; });
+                                    setOriginInput(null); showToast('🗑️ 已移除自訂座標原點');
+                                }} className="mt-1 text-[10px] text-red-500 hover:text-red-400 self-end uppercase">
+                                    清除座標基準點
+                                </button>
+                            )}
+                        </div>
                     )}
 
                     {toast && <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">{toast}</div>}
