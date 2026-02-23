@@ -586,17 +586,33 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     // Canvas setup
     const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
     useEffect(() => {
-        const resize = () => {
-            const canvas = canvasRef.current, cont = containerRef.current; if (!canvas || !cont) return;
-            const dpr = window.devicePixelRatio || 1; dprRef.current = dpr;
-            const rect = cont.getBoundingClientRect();
-            canvas.width = rect.width * dpr; canvas.height = rect.height * dpr;
-            canvas.style.width = `${rect.width}px`; canvas.style.height = `${rect.height}px`;
-            if (offsetRef.current.x === 0) offsetRef.current = { x: rect.width / 2, y: rect.height / 2 };
+        const cont = containerRef.current;
+        if (!cont) return;
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            const entry = entries[0];
+            if (!entry) return;
+            const { width, height } = entry.contentRect;
+            if (width <= 0 || height <= 0) return;
+
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+            const dpr = window.devicePixelRatio || 1;
+            dprRef.current = dpr;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+
+            // If offset is uninitialized (0,0), center it
+            if (offsetRef.current.x === 0 && offsetRef.current.y === 0) {
+                offsetRef.current = { x: width / 2, y: height / 2 };
+            }
             requestDraw();
-        };
-        resize(); window.addEventListener('resize', resize);
-        return () => window.removeEventListener('resize', resize);
+        });
+
+        resizeObserver.observe(cont);
+        return () => resizeObserver.disconnect();
     }, []);
     useEffect(() => {
         const cont = containerRef.current; if (!cont) return;
