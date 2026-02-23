@@ -7,9 +7,6 @@ import {
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
-// ═══════════════════════════════════════════════════════════════
-//  Hex Math & Constants
-// ═══════════════════════════════════════════════════════════════
 const HEX_R = 20;
 const S3 = Math.sqrt(3);
 const hex2px = (q, r) => [HEX_R * (S3 * q + S3 / 2 * r), HEX_R * 1.5 * r];
@@ -27,12 +24,11 @@ const HEX_VERTS = Array.from({ length: 6 }, (_, i) => {
 
 const CENTER_SHAPE = [[0, 0], [1, -1], [1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1]];
 const HQ_SHAPE = CENTER_SHAPE;
-const ZONE_HALF = 13; // 13 on each side + center = 27
+const ZONE_HALF = 13;
 const LEVEL_MULTI = { 1: 5, 2: 2, 3: 1 };
 const ALLIANCE_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 const MAX_HISTORY = 20;
 
-// Offset coordinate conversion for zone rectangle (r+1 flips stagger to 左右左 pattern)
 const toOffsetCol = (q, r) => q + Math.floor((r + 1) / 2);
 
 const isInZone = (q, r, cq, cr) => {
@@ -52,14 +48,107 @@ const getZoneHexes = (cq, cr) => {
     }
     return hexes;
 };
+
+// ═══════════════════════════════════════════════════════════════
+//  HQ Blocking Algorithm (Greedy Dominating Set)
+//  Only blocks HQ positions where ALL 7 footprint hexes are
+//  inside the zone — minimises buildings needed.
+// ═══════════════════════════════════════════════════════════════
+const computeHQBlockingSet = (cq, cr, existingCells) => {
+    const zoneHexes = getZoneHexes(cq, cr);
+    const zoneSet = new Set(zoneHexes.map(([q, r]) => `${q},${r}`));
+
+    const occupied = new Set(
+        Object.keys(existingCells).filter(k =>
+            existingCells[k] && !k.startsWith('text_') && k !== 'origin'
+        )
+    );
+
+    // Only HQ positions where all 7 footprint hexes are inside the zone
+    const hqPlacements = [];
+    for (const [hq, hr] of zoneHexes) {
+        const footprint = HQ_SHAPE.map(([oq, or]) => `${hq + oq},${hr + or}`);
+        if (!footprint.every(k => zoneSet.has(k))) continue;
+        if (footprint.some(k => occupied.has(k))) continue;
+        hqPlacements.push(footprint);
+    }
+    if (hqPlacements.length === 0) return [];
+
+    // hex → list of placement indices that contain it
+    const hexToIdx = new Map();
+    hqPlacements.forEach((fp, idx) => {
+        for (const k of fp) {
+            if (!hexToIdx.has(k)) hexToIdx.set(k, []);
+            hexToIdx.get(k).push(idx);
+        }
+    });
+
+    // ── Phase 1: Greedy ──
+    // Track coverCnt[idx] = number of chosen blockers that cover placement idx
+    const coverCnt = new Array(hqPlacements.length).fill(0);
+    const firstCovered = new Array(hqPlacements.length).fill(false);
+
+    const score = new Map();
+    for (const [k, idxs] of hexToIdx) {
+        if (!occupied.has(k) && zoneSet.has(k)) score.set(k, idxs.length);
+    }
+
+    const chosen = new Set();
+    let totalUnblocked = hqPlacements.length;
+
+    while (totalUnblocked > 0) {
+        let bestKey = null, bestScore = 0;
+        for (const [k, s] of score) {
+            if (s > bestScore) { bestScore = s; bestKey = k; }
+        }
+        if (!bestKey || bestScore === 0) break;
+
+        chosen.add(bestKey);
+        score.delete(bestKey);
+
+        for (const idx of (hexToIdx.get(bestKey) || [])) {
+            coverCnt[idx]++;           // always increment — needed for redundancy removal
+            if (!firstCovered[idx]) {
+                firstCovered[idx] = true;
+                totalUnblocked--;
+                // Decrement score of every other hex in this newly-covered placement
+                for (const k2 of hqPlacements[idx]) {
+                    if (score.has(k2)) {
+                        const ns = score.get(k2) - 1;
+                        if (ns <= 0) score.delete(k2);
+                        else score.set(k2, ns);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Phase 2: Redundancy removal ──
+    // A blocker is redundant if every placement it touches is still covered ≥1
+    // after removing it (i.e., coverCnt[idx] >= 2 for all its placements).
+    // Repeat until no more can be removed.
+    let improved = true;
+    while (improved) {
+        improved = false;
+        for (const key of [...chosen]) {
+            const idxs = hexToIdx.get(key) || [];
+            if (idxs.every(idx => coverCnt[idx] >= 2)) {
+                chosen.delete(key);
+                for (const idx of idxs) coverCnt[idx]--;
+                improved = true;
+            }
+        }
+    }
+
+    return [...chosen];
+};
+
 const hexAlpha = (hex, a) => {
     const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r},${g},${b},${a})`;
 };
-// Compute zone bounding box in pixel space for outline drawing
 const getZoneBounds = (cq, cr) => {
     const cCol = toOffsetCol(cq, cr);
-    // Check all 4 corner rows to find pixel extents
     let minX = Infinity, maxX = -Infinity;
     for (const r of [cr - ZONE_HALF, cr - ZONE_HALF + 1, cr + ZONE_HALF, cr + ZONE_HALF - 1]) {
         const qLeft = (cCol - ZONE_HALF) - Math.floor((r + 1) / 2);
@@ -79,12 +168,8 @@ const getZoneBounds = (cq, cr) => {
     };
 };
 
-// ═══════════════════════════════════════════════════════════════
-//  Draw
-// ═══════════════════════════════════════════════════════════════
 function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null) {
     const { left, right, top, bottom } = viewBounds;
-    // Collect zones
     const zones = [];
     for (const a of alliances) {
         for (const lv of [1, 2, 3]) {
@@ -94,7 +179,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             zones.push({ aid: a.id, lv, cq: c.q, cr: c.r, bounds, color: a.color, isActive: a.id === activeId });
         }
     }
-    // Background hexes
     const rMin = Math.floor((top - HEX_R * 2) / (HEX_R * 1.5));
     const rMax = Math.ceil((bottom + HEX_R * 2) / (HEX_R * 1.5));
     for (let r = rMin; r <= rMax; r++) {
@@ -104,12 +188,10 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
         for (let q = qMin2; q <= qMax2; q++) {
             const [cx, cy] = hex2px(q, r);
             const key = `${q},${r}`, cell = cells[key];
-            // Collect zones this hex belongs to
             const hexZones = [];
             for (const z of zones) {
                 if (isInZone(q, r, z.cq, z.cr)) hexZones.push(z);
             }
-            // Base fill & stroke
             let fill = 'rgba(248,250,252,0.08)', stroke = 'rgba(186,230,253,0.12)', sw = 0.6;
             const hasCell = cell && cell.type !== 'hq_part';
             let isHq = cell?.type === 'hq';
@@ -118,7 +200,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 fill = cell.color || '#3b82f6'; stroke = 'rgba(255,255,255,0.6)'; sw = cell.isCenter ? 2 : 1;
             }
 
-            // Draw hex
             ctx.beginPath();
             for (let i = 0; i < 6; i++) {
                 const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
@@ -127,12 +208,10 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             ctx.closePath();
 
             ctx.fillStyle = fill;
-            // Distinction: make building transparent, HQ gets full color with dashed border
             ctx.globalAlpha = cell?.type === 'building' ? 0.65 : 1;
             ctx.fill();
             ctx.globalAlpha = 1;
 
-            // Overlay each zone's alliance color (stacks on overlap)
             if (!hasCell && hexZones.length > 0) {
                 for (const z of hexZones) {
                     ctx.fillStyle = hexAlpha(z.color, z.isActive ? 0.18 : 0.10);
@@ -142,17 +221,15 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             }
 
             ctx.strokeStyle = stroke; ctx.lineWidth = sw;
-            if (isHq) ctx.setLineDash([4, 4]); // Dashed border for HQ for differentiation
+            if (isHq) ctx.setLineDash([4, 4]);
             ctx.stroke();
-            if (isHq) ctx.setLineDash([]); // Reset dash
+            if (isHq) ctx.setLineDash([]);
             if (hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r) {
                 ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
             }
         }
     }
-    // Zone border: passes through centers of outermost hexagons (cuts them in half)
     for (const z of zones) {
-        // Scan all rows to find outermost hex centers (stagger shifts X per row)
         const cCol = toOffsetCol(z.cq, z.cr);
         let minX = Infinity, maxX = -Infinity;
         for (let row = z.cr - ZONE_HALF; row <= z.cr + ZONE_HALF; row++) {
@@ -163,26 +240,19 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             minX = Math.min(minX, lx);
             maxX = Math.max(maxX, rx);
         }
-        // Border at outermost hex centers — no extra edge offset
-        const leftX = minX;
-        const rightX = maxX;
+        const leftX = minX, rightX = maxX;
         const [, topRowY] = hex2px(0, z.cr - ZONE_HALF);
         const [, botRowY] = hex2px(0, z.cr + ZONE_HALF);
-        const topY = topRowY;
-        const botY = botRowY;
-        // Draw dashed rectangle
         ctx.strokeStyle = hexAlpha(z.color, z.isActive ? 0.9 : 0.5);
         ctx.lineWidth = z.isActive ? 3 : 2;
         ctx.setLineDash([10, 5]);
-        ctx.strokeRect(leftX, topY, rightX - leftX, botY - topY);
+        ctx.strokeRect(leftX, topRowY, rightX - leftX, botRowY - topRowY);
         ctx.setLineDash([]);
-        // Zone label
         ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
         ctx.fillStyle = hexAlpha(z.color, 0.9);
         const aName = alliances.find(a => a.id === z.aid)?.name || '';
-        ctx.fillText(`${aName} Lv${z.lv}`, leftX + 8, topY - 4);
+        ctx.fillText(`${aName} Lv${z.lv}`, leftX + 8, topRowY - 4);
     }
-    // Coordinate labels
     if (showCoords) {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         for (let r2 = rMin; r2 <= rMax; r2++) {
@@ -206,7 +276,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             }
         }
     }
-    // Labels & icons on cells
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const [key, cell] of Object.entries(cells)) {
         if (!cell) continue;
@@ -234,7 +303,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
         }
     }
 
-    // Floating ghost for placement (Hover preview)
     if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'text') {
         const [hq, hr] = hoveredHex;
         let ghostShape = [];
@@ -243,7 +311,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
 
         if (ghostShape.length > 0) {
             let blocked = false;
-
             if (tool === 'center') {
                 if (!activeAlliance || activeAlliance.centers[toolLevel]) blocked = true;
                 if (!blocked) blocked = ghostShape.some(([oq, or]) => cells[`${hq + oq},${hr + or}`]);
@@ -253,9 +320,7 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 if (!activeAlliance) blocked = true;
                 else {
                     const center = activeAlliance.centers[toolLevel];
-                    if (!center || !isInZone(hq, hr, center.q, center.r) || cells[`${hq},${hr}`]) {
-                        blocked = true;
-                    }
+                    if (!center || !isInZone(hq, hr, center.q, center.r) || cells[`${hq},${hr}`]) blocked = true;
                 }
             } else if (tool === 'flex_building') {
                 if (cells[`${hq},${hr}`]) blocked = true;
@@ -269,7 +334,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             for (const [oq, or] of ghostShape) {
                 const tq = hq + oq, tr = hr + or;
                 const [cx, cy] = hex2px(tq, tr);
-
                 ctx.beginPath();
                 for (let i = 0; i < 6; i++) {
                     const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
@@ -277,11 +341,9 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 }
                 ctx.closePath();
                 ctx.fill();
-
                 ctx.strokeStyle = blocked ? 'rgba(255,50,50,0.9)' : 'rgba(255,255,255,0.9)';
                 ctx.lineWidth = (oq === 0 && or === 0) ? 2.5 : 1;
                 ctx.stroke();
-
                 if (oq === 0 && or === 0) {
                     ctx.globalAlpha = 0.9;
                     ctx.fillStyle = 'white';
@@ -294,7 +356,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 }
             }
 
-            // Draw zone preview for center tool
             if (tool === 'center' && !blocked) {
                 const zBounds = getZoneBounds(hq, hr);
                 ctx.strokeStyle = activeAlliance ? hexAlpha(activeAlliance.color, 0.7) : 'rgba(255,255,255,0.5)';
@@ -302,20 +363,16 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 ctx.setLineDash([10, 5]);
                 ctx.strokeRect(zBounds.left, zBounds.top, zBounds.right - zBounds.left, zBounds.bottom - zBounds.top);
                 ctx.setLineDash([]);
-
-                // Draw a label for the preview zone
                 ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
                 ctx.globalAlpha = 0.9;
                 ctx.fillStyle = activeAlliance ? hexAlpha(activeAlliance.color, 0.9) : 'rgba(255,255,255,0.9)';
                 ctx.fillText(`預覽 Lv${toolLevel} 領地範圍`, zBounds.left + 8, zBounds.top - 4);
                 ctx.globalAlpha = 0.55;
             }
-
             ctx.restore();
         }
     }
 
-    // Floating text
     const TEXT_SIZES = { S: 14, M: 24, L: 36 };
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
@@ -342,9 +399,6 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
     ctx.shadowBlur = 0;
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  Component
-// ═══════════════════════════════════════════════════════════════
 export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [alliances, setAlliances] = useState([]);
     const [activeAllianceId, setActiveAllianceId] = useState(null);
@@ -388,7 +442,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
     const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-    // Sync refs
     useEffect(() => { cellsRef.current = cells; pushHistory(cells); requestDraw(); }, [cells]);
     useEffect(() => { alliancesRef.current = alliances; requestDraw(); }, [alliances]);
     useEffect(() => { toolRef.current = tool; }, [tool]);
@@ -398,11 +451,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
     useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
 
-    // Quota helpers
     const getQuota = (alliance, lv) => alliance.centers[lv] ? alliance.memberCount * LEVEL_MULTI[lv] : 0;
     const countBuildings = (aid, lv) => Object.values(cellsRef.current).filter(c => c?.type === 'building' && c.allianceId === aid && c.level === lv).length;
 
-    // Alliance CRUD
     const addAlliance = () => {
         const name = prompt('聯盟名稱（例如 [KTX]）：');
         if (!name?.trim()) return;
@@ -428,7 +479,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         setAlliances(prev => prev.map(a => a.id === id ? { ...a, memberCount: Math.max(1, parseInt(count) || 1) } : a));
     };
 
-    // Auto-fill zone
     const autoFillZone = (aid, lv) => {
         const alliance = alliancesRef.current.find(a => a.id === aid);
         if (!alliance?.centers[lv]) return;
@@ -452,7 +502,53 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast(`⛺ 已填充 ${quota - used - remaining} 棟`);
     };
 
-    // localStorage
+    // ── 防總部封鎖：用最少建築讓區域內無法放置任何7格總部 ──
+    const antiHQFill = (aid, lv) => {
+        const alliance = alliancesRef.current.find(a => a.id === aid);
+        if (!alliance?.centers[lv]) return;
+        const { q: cq, r: cr } = alliance.centers[lv];
+
+        const blockerKeys = computeHQBlockingSet(cq, cr, cellsRef.current);
+
+        if (blockerKeys.length === 0) {
+            showToast('✅ 區域已完全封鎖，無需額外建築');
+            return;
+        }
+
+        const quota = getQuota(alliance, lv);
+        const used = countBuildings(aid, lv);
+        const available = quota - used;
+
+        if (blockerKeys.length > available) {
+            const ok = window.confirm(
+                `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，\n` +
+                `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。\n\n` +
+                `要用盡剩餘配額盡量封鎖嗎？`
+            );
+            if (!ok) return;
+        }
+
+        setCells(prev => {
+            const nc = { ...prev };
+            let placed = 0;
+            const limit = Math.min(blockerKeys.length, available);
+            for (const k of blockerKeys) {
+                if (placed >= limit) break;
+                if (nc[k]) continue;
+                const [q, r] = k.split(',').map(Number);
+                if (!isInZone(q, r, cq, cr)) continue;
+                nc[k] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
+                placed++;
+            }
+            if (placed < blockerKeys.length) {
+                showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，仍有部分HQ位置未封鎖`);
+            } else {
+                showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
+            }
+            return nc;
+        });
+    };
+
     const saveLocal = () => {
         localStorage.setItem('glory_planner', JSON.stringify({ cells: cellsRef.current, alliances: alliancesRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
         showToast('💾 已儲存！');
@@ -473,7 +569,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
     useEffect(() => { loadLocal(); }, []);
 
-    // JSON export/import
     const exportJSON = () => {
         const data = { version: 1, type: 'glory', alliances: alliancesRef.current, cells: cellsRef.current, exportedAt: new Date().toISOString() };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -498,7 +593,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         input.click();
     };
 
-    // --- Firestore cloud sharing (admin only) ---
     const publishToCloud = async () => {
         const title = prompt('請輸入共享地圖標題：', '榮耀之戰規劃圖');
         if (!title) return;
@@ -535,11 +629,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast('🗑️ 已刪除');
     };
 
-    // --- Full-map PNG export ---
     const exportImage = () => {
         const as = alliancesRef.current;
         const cs = cellsRef.current;
-        // Compute bounding box of all zones + cells
         let minPx = Infinity, maxPx = -Infinity, minPy = Infinity, maxPy = -Infinity;
         for (const a of as) {
             for (const lv of [1, 2, 3]) {
@@ -583,18 +675,15 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast('📸 已匯出完整地圖！');
     };
 
-    // Canvas setup
     const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
     useEffect(() => {
         const cont = containerRef.current;
         if (!cont) return;
-
         const resizeObserver = new ResizeObserver((entries) => {
             const entry = entries[0];
             if (!entry) return;
             const { width, height } = entry.contentRect;
             if (width <= 0 || height <= 0) return;
-
             const canvas = canvasRef.current;
             if (!canvas) return;
             const dpr = window.devicePixelRatio || 1;
@@ -603,14 +692,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             canvas.height = height * dpr;
             canvas.style.width = `${width}px`;
             canvas.style.height = `${height}px`;
-
-            // If offset is uninitialized (0,0), center it
             if (offsetRef.current.x === 0 && offsetRef.current.y === 0) {
                 offsetRef.current = { x: width / 2, y: height / 2 };
             }
             requestDraw();
         });
-
         resizeObserver.observe(cont);
         return () => resizeObserver.disconnect();
     }, []);
@@ -649,7 +735,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         ctx.restore();
     };
 
-    // Mouse handlers
     const getWorldPos = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
         return [(e.clientX - rect.left - offsetRef.current.x) / zoomRef.current, (e.clientY - rect.top - offsetRef.current.y) / zoomRef.current];
@@ -677,14 +762,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             const dx = wx - dragInfo.startX, dy = wy - dragInfo.startY;
             setCells(prev => {
                 if (!dragInfo.id || !prev[dragInfo.id]) return prev;
-                return {
-                    ...prev,
-                    [dragInfo.id]: {
-                        ...prev[dragInfo.id],
-                        x: dragInfo.ix + dx,
-                        y: dragInfo.iy + dy
-                    }
-                };
+                return { ...prev, [dragInfo.id]: { ...prev[dragInfo.id], x: dragInfo.ix + dx, y: dragInfo.iy + dy } };
             });
             return;
         }
@@ -702,10 +780,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
         if (toolRef.current === 'hand') {
             const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
-            if (hitText !== hoveredTextId) {
-                setHoveredTextId(hitText);
-                requestDraw();
-            }
+            if (hitText !== hoveredTextId) { setHoveredTextId(hitText); requestDraw(); }
         }
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
@@ -732,15 +807,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
             return;
         }
-
         const [q, r] = px2hex(wx, wy);
-
-        // Edit Origin directly if tool is origin
-        if (toolRef.current === 'origin') {
-            setOriginInput({ q, r });
-            return;
-        }
-
+        if (toolRef.current === 'origin') { setOriginInput({ q, r }); return; }
         const cell = cellsRef.current[`${q},${r}`];
         if (cell?.isCenter && (cell.type === 'hq' || cell.type === 'center')) {
             const name = prompt('輸入名稱（留空清除）', cell.label || '');
@@ -760,13 +828,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const applyTool = (q, r, wx, wy) => {
         const t = toolRef.current, lv = toolLevelRef.current, aid = activeIdRef.current;
         const alliance = alliancesRef.current.find(a => a.id === aid);
-
         let activeColor = textColorRef.current;
         if (!activeColor) {
             if (t === 'hq') activeColor = darkenHex(alliance?.color) || '#64748b';
             else activeColor = alliance?.color || '#94a3b8';
         }
-
         if (t === 'text') {
             setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current || '#ffffff', size: textSizeRef.current, editId: null });
             return;
@@ -779,8 +845,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 else {
                     const tgt = nc[key];
                     if (tgt?.isCenter && tgt.type === 'center') {
-                        const shape = CENTER_SHAPE;
-                        shape.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
+                        CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
                         setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
                     } else if (tgt?.parent && tgt.type === 'center') {
                         const [pq, pr] = tgt.parent.split(',').map(Number);
@@ -789,9 +854,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     } else if (tgt?.parent && tgt.type === 'hq') {
                         const [pq, pr] = tgt.parent.split(',').map(Number);
                         HQ_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
-                    } else {
-                        delete nc[key];
-                    }
+                    } else { delete nc[key]; }
                 }
             } else if (t === 'center') {
                 if (!alliance) { showToast('❌ 請先選擇聯盟'); return prev; }
@@ -816,7 +879,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     if (used >= quota) { showToast('❌ 配額已滿'); return prev; }
                     nc[key] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
                 } else {
-                    // Flex building: no zone check, no quota check, but NO overlap
                     if (nc[key]) return prev;
                     nc[key] = { type: 'flex_building', allianceId: aid, level: lv, color: activeColor };
                 }
@@ -839,17 +901,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
     return (
         <div className="flex flex-col h-full min-h-0 w-full bg-slate-900 overflow-hidden border-t border-slate-700 shadow-2xl relative z-50">
-            {/* Toolbar */}
             <div className="p-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between z-10 flex-wrap gap-2">
                 <div className="flex items-center gap-2 flex-wrap">
-                    {/* Map tabs */}
                     <div className="flex bg-slate-800 rounded-lg p-1">
                         <TabBtn onClick={() => onSwitchMap('svs')} icon={<MapIcon size={14} />} label="SVS" ac="bg-blue-600" />
                         <TabBtn onClick={() => onSwitchMap('fishpond')} icon={<Fish size={14} />} label="魚池" ac="bg-rose-600" />
                         <TabBtn active icon={<Shield size={14} />} label="榮耀" ac="bg-amber-600" />
                     </div>
                     <div className="h-6 w-px bg-slate-700" />
-                    {/* Tools */}
                     <div className="flex bg-slate-800 rounded-lg p-1">
                         <ToolBtn active={tool === 'hand'} onClick={() => setTool('hand')} icon={<Hand size={15} />} label="移動" />
                         <ToolBtn active={tool === 'center'} onClick={() => setTool('center')} icon={<Shield size={15} />} label="聯盟中心" />
@@ -860,8 +919,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
                     </div>
-
-                    {/* Level selector */}
                     {(tool === 'center' || tool === 'building') && (
                         <div className="flex bg-slate-800 rounded-lg p-1 gap-0.5">
                             {[1, 2, 3].map(lv => (
@@ -939,9 +996,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 </div>
             </div>
 
-            {/* Main: Left Panel + Canvas */}
             <div className="flex flex-1 overflow-hidden">
-                {/* Alliance Panel */}
                 <div className="w-56 bg-slate-950/50 border-r border-slate-800 overflow-y-auto p-3 space-y-2 flex-shrink-0">
                     <button onClick={addAlliance} className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg text-xs font-bold flex items-center justify-center gap-1 border border-amber-600/30">
                         <Plus size={14} /> 新增聯盟
@@ -981,6 +1036,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                                         className="px-1.5 py-0.5 bg-amber-600/20 text-amber-400 rounded text-[9px] hover:bg-amber-600/30">
                                                         填滿
                                                     </button>
+                                                    <button onClick={(e) => { e.stopPropagation(); antiHQFill(a.id, lv); }}
+                                                        title="自動放置最少建築，封鎖區域內所有可能的總部位置"
+                                                        className="px-1.5 py-0.5 bg-rose-600/20 text-rose-400 rounded text-[9px] hover:bg-rose-600/30">
+                                                        🛡️防總
+                                                    </button>
                                                 </div>
                                             )}
                                         </div>
@@ -993,7 +1053,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     {alliances.length === 0 && <p className="text-slate-600 text-[10px] text-center py-4">點擊上方新增聯盟</p>}
                 </div>
 
-                {/* Canvas */}
                 <div ref={containerRef} className="flex-1 relative overflow-hidden">
                     <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
@@ -1002,9 +1061,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         onContextMenu={e => e.preventDefault()} />
 
                     {textInput && (
-                        <input
-                            autoFocus
-                            defaultValue={textInput.val}
+                        <input autoFocus defaultValue={textInput.val}
                             style={{
                                 position: 'absolute',
                                 left: textInput.x * zoom + offsetRef.current.x,
@@ -1028,15 +1085,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                         setCells(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
                                     }
                                     setTextInput(null);
-                                } else if (e.key === 'Escape') {
-                                    setTextInput(null);
-                                }
+                                } else if (e.key === 'Escape') { setTextInput(null); }
                             }}
-                            onBlur={() => setTextInput(null)}
-                        />
+                            onBlur={() => setTextInput(null)} />
                     )}
 
-                    {/* Origin Input Box */}
                     {originInput && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl z-30 flex flex-col gap-3 min-w-[250px]">
                             <h3 className="text-white text-sm font-bold flex items-center gap-2"><MapPin size={16} className="text-amber-400" /> 校正遊戲對應座標</h3>
@@ -1072,7 +1125,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
                     {toast && <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-800/90 text-white text-sm font-bold rounded-xl border border-slate-600 shadow-xl backdrop-blur z-20">{toast}</div>}
 
-                    {/* Shared maps modal */}
                     {showShared && (
                         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 backdrop-blur-sm">
                             <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-[500px] max-h-[80%] flex flex-col overflow-hidden">
@@ -1091,10 +1143,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                                 <p className="text-white font-bold text-sm">{m.title}</p>
                                                 <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
                                                     <span className="px-1.5 py-0.5 rounded bg-amber-900/50 text-amber-400">榮耀</span>
-                                                    <span className="flex items-center gap-1">
-                                                        <Clock size={10} />
-                                                        {m.publishedAt?.toDate?.()?.toLocaleString('zh-TW')?.slice(0, 16) || '—'}
-                                                    </span>
+                                                    <span className="flex items-center gap-1"><Clock size={10} />{m.publishedAt?.toDate?.()?.toLocaleString('zh-TW')?.slice(0, 16) || '—'}</span>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-1.5">
@@ -1112,7 +1161,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         </div>
                     )}
 
-                    {/* Legend */}
                     <div className="absolute bottom-4 right-4 bg-slate-900/70 backdrop-blur border border-slate-700 p-3 rounded-xl pointer-events-none text-[10px] text-slate-400 space-y-1">
                         <h4 className="text-amber-400 font-bold text-xs uppercase tracking-widest mb-1.5">操作指南</h4>
                         <p>✋ <b>手掌</b>：拖曳 ┃ 🔄 <b>滾輪</b>：縮放</p>
@@ -1120,6 +1168,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <p>🏛️ <b>聯盟中心</b>：放置後自動產生 27×27 區域</p>
                         <p>⛺ <b>小建築</b>：拖曳快速佈置 ┃ 📁 <b>匯出/匯入</b></p>
                         <p>🔤 <b>文字</b>：點擊放置標註 ┃ 雙擊編輯內容</p>
+                        <p>🛡️ <b>防總</b>：最少建築封鎖所有內部HQ位置</p>
                     </div>
                 </div>
             </div>
