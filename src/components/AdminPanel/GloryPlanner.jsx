@@ -417,6 +417,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [originInput, setOriginInput] = useState(null);
     const [isPanning, setIsPanning] = useState(false);
     const [hoveredTextId, setHoveredTextId] = useState(null);
+    const [showExportList, setShowExportList] = useState(false);
+    const [exportTextData, setExportTextData] = useState('');
+    const [hoverCoordText, setHoverCoordText] = useState('');
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
@@ -629,6 +632,81 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast('🗑️ 已刪除');
     };
 
+    const exportPositions = () => {
+        if (!cellsRef.current.origin) {
+            showToast('❌ 請先校正原點座標！');
+            return;
+        }
+
+        const { q: q0, r: r0, x: x0, y: y0 } = cellsRef.current.origin;
+        const cs = cellsRef.current;
+        const as = alliancesRef.current;
+
+        // Group by alliance and filter out text/colors/etc.
+        const output = [];
+
+        for (const a of as) {
+            output.push(`【${a.name}】`);
+
+            // Output centers and buildings
+            for (const key of Object.keys(cs)) {
+                const cell = cs[key];
+                if (!cell || cell.allianceId !== a.id) continue;
+
+                // Only log center of HQ or Centers
+                if ((cell.type === 'center' || cell.type === 'hq') && !cell.isCenter) continue;
+
+                const [q, r] = key.split(',').map(Number);
+                if (isNaN(q) || isNaN(r)) continue;
+
+                // Calculate real game coordinates
+                const gy = r - r0 + y0;
+                const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+
+                let title = '';
+                if (cell.type === 'center') title = `Lv${cell.level} 聯盟中心`;
+                else if (cell.type === 'hq') title = `總部 ${cell.label || ''}`;
+                else if (cell.type === 'building') title = `Lv${cell.level} 小建築`;
+                else if (cell.type === 'flex_building') title = `彈性建築`;
+
+                output.push(`- ${title}: (${gx}, ${gy})`);
+            }
+            output.push('');
+        }
+
+        // Output unaffiliated HQs
+        const unaffiliatedHQs = Object.keys(cs).filter(k => {
+            const c = cs[k];
+            return c && c.type === 'hq' && c.isCenter && !c.allianceId;
+        });
+
+        if (unaffiliatedHQs.length > 0) {
+            output.push('【未分配聯盟的總部】');
+            unaffiliatedHQs.forEach(key => {
+                const c = cs[key];
+                const [q, r] = key.split(',').map(Number);
+                const gy = r - r0 + y0;
+                const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+                output.push(`- 總部 ${c.label || ''}: (${gx}, ${gy})`);
+            });
+        }
+
+        const textToCopy = output.join('\n').trim();
+        if (!textToCopy) {
+            showToast('⚠️ 沒有可匯出的建築');
+            return;
+        }
+
+        setExportTextData(textToCopy);
+        setShowExportList(true);
+
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            showToast('📋 座標清單已複製到剪貼簿！');
+        }).catch(() => {
+            showToast('❌ 複製失敗，請手動複製右側清單內容');
+        });
+    };
+
     const exportImage = () => {
         const as = alliancesRef.current;
         const cs = cellsRef.current;
@@ -739,6 +817,17 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         const rect = canvasRef.current.getBoundingClientRect();
         return [(e.clientX - rect.left - offsetRef.current.x) / zoomRef.current, (e.clientY - rect.top - offsetRef.current.y) / zoomRef.current];
     };
+
+    const getHoverCoordLabel = useCallback((q, r) => {
+        const origin = cellsRef.current?.origin;
+        if (origin) {
+            const { q: q0, r: r0, x: x0, y: y0 } = origin;
+            const gy = r - r0 + y0;
+            const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+            return `(${gx}, ${gy})`;
+        }
+        return `(${q}, ${r})`;
+    }, []);
     const handleMouseDown = (e) => {
         dragStart.current = { x: e.clientX, y: e.clientY };
         const [wx, wy] = getWorldPos(e);
@@ -784,7 +873,15 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
-        if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
+        if (!p || p[0] !== hq || p[1] !== hr) {
+            hoveredHex.current = [hq, hr];
+
+            // ✅ 新增：右上角顯示座標
+            const label = getHoverCoordLabel(hq, hr);
+            setHoverCoordText(prev => (prev === label ? prev : label));
+
+            requestDraw();
+        }
     };
     const handleMouseUp = () => {
         if (draggingText.current) { draggingText.current = null; requestDraw(); }
@@ -990,6 +1087,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
                         <Navigation size={12} /> 座標
                     </button>
+                    <button onClick={exportPositions} title="匯出座標清單到剪貼簿" className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-emerald-500">
+                        📋 複製座標
+                    </button>
                     <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-amber-500">
                         📸 匯出圖片
                     </button>
@@ -1053,12 +1153,55 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     {alliances.length === 0 && <p className="text-slate-600 text-[10px] text-center py-4">點擊上方新增聯盟</p>}
                 </div>
 
+                {/* Right Panel for Export List (Toggled) */}
+                {showExportList && (
+                    <div className="w-64 bg-slate-900 border-r border-slate-800 overflow-y-auto flex flex-col flex-shrink-0 z-10 shadow-xl">
+                        <div className="p-3 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900/90 backdrop-blur">
+                            <h3 className="font-bold text-amber-400 text-sm flex items-center gap-2"><MapPin size={14} />座標清單</h3>
+                            <button onClick={() => setShowExportList(false)} className="text-slate-400 hover:text-white p-1 bg-slate-800 rounded">
+                                <X size={14} />
+                            </button>
+                        </div>
+                        <div className="p-3">
+                            <textarea
+                                readOnly
+                                value={exportTextData}
+                                className="w-full h-[500px] bg-slate-950 text-slate-300 text-xs p-2 rounded outline-none border border-slate-800 resize-none font-mono tracking-wider leading-relaxed"
+                            />
+                            <button
+                                onClick={() => {
+                                    navigator.clipboard.writeText(exportTextData);
+                                    showToast('📋 已重新複製');
+                                }}
+                                className="w-full mt-3 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-COLORS"
+                            >
+                                <Copy size={12} /> 重新複製到剪貼簿
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 <div ref={containerRef} className="flex-1 relative overflow-hidden">
                     <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
                         onClick={handleClick} onDoubleClick={handleDoubleClick}
-                        onMouseLeave={() => { isDragging.current = false; isPainting.current = false; draggingText.current = null; hoveredHex.current = null; requestDraw(); }}
+                        onMouseLeave={() => {
+                            isDragging.current = false;
+                            isPainting.current = false;
+                            draggingText.current = null;
+                            hoveredHex.current = null;
+                            setHoverCoordText('');   // ✅ 新增：離開畫布就隱藏
+                            requestDraw();
+                        }}
                         onContextMenu={e => e.preventDefault()} />
+
+                    {!!hoverCoordText && (
+                        <div className="absolute top-3 right-3 z-20 pointer-events-none">
+                            <div className="px-2.5 py-1.5 rounded-lg bg-slate-950/70 border border-slate-700 backdrop-blur text-[11px] font-mono text-amber-300 shadow-lg">
+                                {hoverCoordText}
+                            </div>
+                        </div>
+                    )}
 
                     {textInput && (
                         <input autoFocus defaultValue={textInput.val}
