@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
-    Share2, Copy, Clock, Navigation, MapPin, MousePointer2
+    Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -420,6 +420,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [showExportList, setShowExportList] = useState(false);
     const [exportTextData, setExportTextData] = useState('');
     const [hoverCoordText, setHoverCoordText] = useState('');
+    const [showHelp, setShowHelp] = useState(false);
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
@@ -1094,6 +1095,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         </button>
                     </>}
                     <div className="h-6 w-px bg-slate-700" />
+                    <button onClick={() => setShowHelp(true)} className="px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors">
+                        <HelpCircle size={12} className="text-amber-400" /> 說明
+                    </button>
                     <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
                         <Navigation size={12} /> 座標
                     </button>
@@ -1309,6 +1313,64 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                             </div>
                                         </div>
                                     ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {showHelp && (
+                        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                            <div className="bg-slate-900 rounded-2xl border border-slate-700 shadow-2xl w-full max-w-2xl max-h-full flex flex-col overflow-hidden">
+                                <div className="p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/50">
+                                    <h3 className="text-white text-lg font-bold flex items-center gap-2">
+                                        <HelpCircle className="text-amber-400" size={20} />
+                                        榮耀之戰 (Glory Planner) 使用指南
+                                    </h3>
+                                    <button onClick={() => setShowHelp(false)} className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-700 transition-colors">
+                                        <X size={20} />
+                                    </button>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-5 text-slate-300 text-sm space-y-6">
+                                    <section>
+                                        <h4 className="text-amber-400 font-bold mb-2 flex items-center gap-2"><Plus size={16} /> 一、 建立與管理聯盟</h4>
+                                        <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                                            <li><strong className="text-slate-200">新增聯盟</strong>：在左側面板點擊「+ 新增聯盟」，可以為戰場建立不同的勢力。</li>
+                                            <li><strong className="text-slate-200">編輯資訊</strong>：點擊聯盟名稱即可編輯；點擊旁邊的顏色圈圈可自訂專屬代表色。</li>
+                                            <li><strong className="text-slate-200">切換操作聯盟</strong>：點擊列表中的聯盟卡片使其外框高亮。在此狀態下放置的「聯盟中心」、「建築」或「總部(HQ)」都會自動歸屬於該聯盟。</li>
+                                            <li><strong className="text-slate-200">配額檢視</strong>：每個聯盟卡片下方會即時計算並顯示當前剩餘的配額（例如 Lv1 中心 0/5）。</li>
+                                        </ul>
+                                    </section>
+
+                                    <section>
+                                        <h4 className="text-blue-400 font-bold mb-2 flex items-center gap-2"><MousePointer2 size={16} /> 二、 工具列全解析</h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 text-slate-400">
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Hand size={14} /> 移動</strong>：平移圖板視角。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Shield size={14} /> 聯盟中心</strong>：放置後，周圍自動產生 27×27 專屬領地區域。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1">⛺ 小建築</strong>：在領地內鋪設。按住滑鼠左鍵拖曳可快速塗抹。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1">⛺✨ 彈性建築</strong>：無視領地範圍限制也無數量限制的特殊建築。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Home size={14} /> 總部 (HQ)</strong>：放置玩家基地。可隨時改變標記顏色。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><MapPin size={14} /> 坐標校正</strong>：點擊設定遊戲原點，讓圖板座標與真實座標同步。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Type size={14} /> 文字</strong>：點擊放置標註，按住可拖曳，雙擊可編輯文字。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Trash2 size={14} /> 橡皮擦</strong>：點擊刪除元素。刪除聯盟中心會一併清除其專屬小建築。</div>
+                                        </div>
+                                    </section>
+
+                                    <section>
+                                        <h4 className="text-emerald-400 font-bold mb-2 flex items-center gap-2"><Shield size={16} /> 三、 進階戰術功能</h4>
+                                        <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                                            <li><strong className="text-slate-200">智能防總部封鎖線 (Anti-HQ)</strong>：框選區域時自動計算「用最少建築封鎖敵方所有能飛入總部的空地」的最佳演算法。</li>
+                                            <li><strong className="text-slate-200">實時座標顯示</strong>：開啟座標顯示後，游標停留處會即時顯示精準的遊戲內座標。</li>
+                                        </ul>
+                                    </section>
+
+                                    <section>
+                                        <h4 className="text-purple-400 font-bold mb-2 flex items-center gap-2"><Save size={16} /> 四、 儲存與匯出</h4>
+                                        <ul className="list-disc pl-5 space-y-1 text-slate-400">
+                                            <li><strong className="text-slate-200">本地與雲端儲存</strong>：點擊儲存可保存在本地；管理員亦可發佈至雲端共享區。</li>
+                                            <li><strong className="text-slate-200">複製座標</strong>：一鍵複製地圖上所有重要據點座標，方便發送到聊天軟體。</li>
+                                            <li><strong className="text-slate-200">匯出圖片</strong>：裁切當前可視範圍並下載為精美的戰術圖片。</li>
+                                        </ul>
+                                    </section>
                                 </div>
                             </div>
                         </div>
