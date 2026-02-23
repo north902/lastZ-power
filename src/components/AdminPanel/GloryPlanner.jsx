@@ -82,7 +82,7 @@ const getZoneBounds = (cq, cr) => {
 // ═══════════════════════════════════════════════════════════════
 //  Draw
 // ═══════════════════════════════════════════════════════════════
-function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null) {
+function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null) {
     const { left, right, top, bottom } = viewBounds;
     // Collect zones
     const zones = [];
@@ -322,9 +322,22 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
     for (const key of Object.keys(cells)) {
         if (!key.startsWith('text_')) continue;
         const cell = cells[key];
+        const isHovered = key === hoveredTextId;
+
+        ctx.save();
+        if (isHovered) {
+            ctx.shadowColor = 'rgba(245, 158, 11, 0.8)';
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+            const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
+            const textWidth = ctx.measureText(cell.label).width;
+            ctx.fillRect(cell.x - textWidth / 2 - 5, cell.y - sz / 2, textWidth + 10, sz);
+        }
+
         const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
         ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
         ctx.fillText(cell.label, cell.x, cell.y);
+        ctx.restore();
     }
     ctx.shadowBlur = 0;
 }
@@ -348,6 +361,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [textSize, setTextSize] = useState('M');
     const [textInput, setTextInput] = useState(null);
     const [originInput, setOriginInput] = useState(null);
+    const [isPanning, setIsPanning] = useState(false);
+    const [hoveredTextId, setHoveredTextId] = useState(null);
 
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
@@ -614,7 +629,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             top: -offsetRef.current.y / z, bottom: (rect.height - offsetRef.current.y) / z
         };
         const activeA = alliancesRef.current.find(a => a.id === activeIdRef.current);
-        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA);
+        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null);
         ctx.restore();
     };
 
@@ -634,7 +649,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             }
         }
         if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
-            isDragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
+            isDragging.current = true; setIsPanning(true); lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
         } else if (e.button === 0 && (toolRef.current === 'building' || toolRef.current === 'eraser')) {
             isPainting.current = true; lastPaintHex.current = null;
         }
@@ -642,8 +657,19 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const handleMouseMove = (e) => {
         const [wx, wy] = getWorldPos(e);
         if (draggingText.current) {
-            const dx = wx - draggingText.current.startX, dy = wy - draggingText.current.startY;
-            setCells(prev => ({ ...prev, [draggingText.current.id]: { ...prev[draggingText.current.id], x: draggingText.current.ix + dx, y: draggingText.current.iy + dy } }));
+            const dragInfo = draggingText.current;
+            const dx = wx - dragInfo.startX, dy = wy - dragInfo.startY;
+            setCells(prev => {
+                if (!dragInfo.id || !prev[dragInfo.id]) return prev;
+                return {
+                    ...prev,
+                    [dragInfo.id]: {
+                        ...prev[dragInfo.id],
+                        x: dragInfo.ix + dx,
+                        y: dragInfo.iy + dy
+                    }
+                };
+            });
             return;
         }
         if (isDragging.current) {
@@ -660,15 +686,18 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
         if (toolRef.current === 'hand') {
             const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
-            document.body.style.cursor = hitText ? 'move' : 'default';
+            if (hitText !== hoveredTextId) {
+                setHoveredTextId(hitText);
+                requestDraw();
+            }
         }
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
         if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
     };
     const handleMouseUp = () => {
-        if (draggingText.current) { draggingText.current = null; return; }
-        isDragging.current = false; isPainting.current = false; lastPaintHex.current = null;
+        if (draggingText.current) { draggingText.current = null; requestDraw(); }
+        isDragging.current = false; setIsPanning(false); isPainting.current = false; lastPaintHex.current = null;
     };
     const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
@@ -787,7 +816,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
 
     useEffect(() => { document.body.style.cursor = 'default'; }, [tool]);
-    const cursorClass = tool === 'hand' ? 'cursor-grab' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
+    const cursorClass = tool === 'hand'
+        ? (draggingText.current ? 'cursor-move' : (isPanning ? 'cursor-grabbing' : (hoveredTextId ? 'cursor-move' : 'cursor-grab')))
+        : (isPanning ? 'cursor-grabbing' : (tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell'));
     const activeAlliance = alliances.find(a => a.id === activeAllianceId);
 
     return (

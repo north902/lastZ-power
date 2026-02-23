@@ -243,9 +243,22 @@ function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex, tool = 'hand', c
     for (const key of Object.keys(cs)) {
         if (!key.startsWith('text_')) continue;
         const cell = cs[key];
+        const isHovered = key === hoveredHex; // reuse hoveredHex argument as hoveredTextId if tool is hand
+
+        ctx.save();
+        if (isHovered) {
+            ctx.shadowColor = 'rgba(59, 130, 246, 0.8)';
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+            const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
+            const textWidth = ctx.measureText(cell.label).width;
+            ctx.fillRect(cell.x - textWidth / 2 - 5, cell.y - sz / 2, textWidth + 10, sz);
+        }
+
         const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
         ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
         ctx.fillText(cell.label, cell.x, cell.y);
+        ctx.restore();
     }
     ctx.shadowBlur = 0;
 }
@@ -285,6 +298,8 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const [textSize, setTextSize] = useState('M');
     const [textInput, setTextInput] = useState(null);
     const [originInput, setOriginInput] = useState(null);
+    const [isPanning, setIsPanning] = useState(false);
+    const [hoveredTextId, setHoveredTextId] = useState(null);
 
     // History
     const historyRef = useRef([{}]);
@@ -536,7 +551,8 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         ctx.scale(dpr, dpr);
         ctx.translate(offsetRef.current.x, offsetRef.current.y);
         ctx.scale(zoomRef.current, zoomRef.current);
-        drawMap(ctx, mode, cellsRef.current, radius, showCoordsRef.current, hoveredHex.current, toolRef.current, colorRef.current);
+        const hId = toolRef.current === 'hand' ? hoveredTextId : null;
+        drawMap(ctx, mode, cellsRef.current, radius, showCoordsRef.current, hoveredHex.current || hId, toolRef.current, colorRef.current);
         ctx.restore();
     };
 
@@ -560,7 +576,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         }
 
         if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
-            isDragging.current = true; lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
+            isDragging.current = true; setIsPanning(true); lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
         }
     };
     const handleMouseMove = (e) => {
@@ -568,16 +584,20 @@ export const SvsPlanner = ({ isAdmin = false }) => {
 
         // Text dragging
         if (draggingText.current) {
-            const dx = wx - draggingText.current.startX;
-            const dy = wy - draggingText.current.startY;
-            setCells(prev => ({
-                ...prev,
-                [draggingText.current.id]: {
-                    ...prev[draggingText.current.id],
-                    x: draggingText.current.initialX + dx,
-                    y: draggingText.current.initialY + dy
-                }
-            }));
+            const dragInfo = draggingText.current;
+            const dx = wx - dragInfo.startX;
+            const dy = wy - dragInfo.startY;
+            setCells(prev => {
+                if (!dragInfo.id || !prev[dragInfo.id]) return prev;
+                return {
+                    ...prev,
+                    [dragInfo.id]: {
+                        ...prev[dragInfo.id],
+                        x: dragInfo.initialX + dx,
+                        y: dragInfo.initialY + dy
+                    }
+                };
+            });
             return;
         }
 
@@ -591,7 +611,10 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         // Hover effects
         if (toolRef.current === 'hand') {
             const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
-            document.body.style.cursor = hitText ? 'move' : 'default';
+            if (hitText !== hoveredTextId) {
+                setHoveredTextId(hitText);
+                requestDraw();
+            }
         }
 
         const [hq, hr] = px2hex(wx, wy);
@@ -599,8 +622,8 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
     };
     const handleMouseUp = (e) => {
-        if (draggingText.current) { draggingText.current = null; return; }
-        if (isDragging.current) { isDragging.current = false; return; }
+        if (draggingText.current) { draggingText.current = null; requestDraw(); }
+        if (isDragging.current) { isDragging.current = false; setIsPanning(false); }
     };
     const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
@@ -705,7 +728,9 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     // Reset cursor when tool changes
     useEffect(() => { document.body.style.cursor = 'default'; }, [tool]);
 
-    const cursorClass = tool === 'hand' ? '' : tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell';
+    const cursorClass = tool === 'hand'
+        ? (draggingText.current ? 'cursor-move' : (isPanning ? 'cursor-grabbing' : (hoveredTextId ? 'cursor-move' : 'cursor-grab')))
+        : (isPanning ? 'cursor-grabbing' : (tool === 'eraser' ? 'cursor-crosshair' : 'cursor-cell'));
 
     // Glory mode: render dedicated component
     if (mapMode === 'glory') {
