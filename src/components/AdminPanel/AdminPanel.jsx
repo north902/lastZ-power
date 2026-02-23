@@ -229,7 +229,7 @@ const AdminPanel = ({ forcePlanner = false }) => {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700 relative">
+    <div className={`space-y-8 animate-in fade-in duration-700 relative ${forcePlanner ? 'flex-1 flex flex-col min-h-0' : ''}`}>
       {/* 編輯 Modal */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -402,7 +402,7 @@ const AdminPanel = ({ forcePlanner = false }) => {
         </div>
       )}
 
-      <div className={forcePlanner ? "" : "bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden"}>
+      <div className={forcePlanner ? "flex-1 flex flex-col min-h-0" : "bg-white rounded-2xl border border-gray-100 shadow-xl shadow-gray-200/40 relative overflow-hidden"}>
         {viewMode !== 'planner' && !forcePlanner && (
           <div className="p-4 border-b border-gray-100 bg-gray-50/30 flex flex-col sm:flex-row gap-4">
             <div className="relative flex-grow">
@@ -421,9 +421,9 @@ const AdminPanel = ({ forcePlanner = false }) => {
           </div>
         )}
 
-        <div className={forcePlanner ? "" : "overflow-x-auto"}>
+        <div className={forcePlanner ? "flex-1 flex flex-col min-h-0" : "overflow-x-auto"}>
           {viewMode === 'planner' ? (
-            <div className={forcePlanner ? "" : "p-4 bg-slate-950"}>
+            <div className={forcePlanner ? "flex-1 flex flex-col min-h-0" : "p-4 bg-slate-950"}>
               <SvsPlanner isAdmin={!!adminData} />
             </div>
           ) : viewMode === 'alliances' ? (

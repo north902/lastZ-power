@@ -691,7 +691,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     }
 
     return (
-        <div className="flex flex-col h-[calc(100vh-200px)] bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
+        <div className="flex flex-col h-full min-h-0 w-full bg-slate-900 overflow-hidden border-t border-slate-700 shadow-2xl relative z-50">
             {/* Toolbar */}
             <div className="p-3 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between z-10 flex-wrap gap-2">
                 <div className="flex items-center gap-2.5 flex-wrap">

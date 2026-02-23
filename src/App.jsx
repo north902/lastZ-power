@@ -155,9 +155,9 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-grow">
-        <div className="max-w-7xl mx-auto px-4 py-8 md:py-12">
-          <div className="inline-flex p-1 bg-white border border-gray-200 rounded-2xl mb-10 shadow-sm overflow-x-auto max-w-full">
+      <main className={`flex-grow ${activeTab === 'planner' ? 'flex flex-col h-[calc(100vh-72px)] overflow-hidden' : ''}`}>
+        <div className={`mx-auto ${activeTab === 'planner' ? 'w-full flex-1 flex flex-col min-h-0' : 'max-w-7xl px-4 py-8 md:py-12'}`}>
+          <div className={`p-1 bg-white border-b border-gray-200 shadow-sm overflow-x-auto w-full shrink-0 z-10 ${activeTab === 'planner' ? 'flex items-center ps-4 pe-4' : 'inline-flex rounded-2xl mb-10 max-w-full'}`}>
             <button
               onClick={() => setActiveTab('form')}
               className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'form'
@@ -200,10 +200,10 @@ function App() {
             )}
           </div>
 
-          <div className="relative">
+          <div className={`relative ${activeTab === 'planner' ? 'flex-1 flex flex-col min-h-0' : ''}`}>
             {activeTab === 'admin' && isAdmin && <AdminPanel />}
             {activeTab === 'planner' && isAdmin && (
-              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex-1 flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-500 min-h-0">
                 <AdminPanel forcePlanner={true} />
               </div>
             )}
@@ -213,31 +213,33 @@ function App() {
         </div>
       </main>
 
-      <footer className="bg-white border-t border-gray-100 py-12 px-4">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex flex-col items-center md:items-start gap-2">
-            <div className="flex items-center gap-2 opacity-30 grayscale">
-              <Sword size={20} />
-              <span className="font-black text-lg tracking-tighter uppercase whitespace-nowrap">{t('title')}</span>
+      {activeTab !== 'planner' && (
+        <footer className="bg-white border-t border-gray-100 py-12 px-4 whitespace-nowrap overflow-hidden">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-8">
+            <div className="flex flex-col items-center md:items-start gap-2">
+              <div className="flex items-center gap-2 opacity-30 grayscale">
+                <Sword size={20} />
+                <span className="font-black text-lg tracking-tighter uppercase whitespace-nowrap">{t('title')}</span>
+              </div>
+              <p className="text-gray-400 text-xs font-medium">{t('footer_text')}</p>
             </div>
-            <p className="text-gray-400 text-xs font-medium">{t('footer_text')}</p>
-          </div>
 
-          <div className="flex items-center gap-8">
-            <div className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em] hidden sm:block">
-              Intel Status: <span className="text-green-500">{t('status_operational')}</span>
+            <div className="flex items-center gap-8">
+              <div className="text-[10px] font-black text-gray-300 uppercase tracking-[0.3em] hidden sm:block">
+                Intel Status: <span className="text-green-500">{t('status_operational')}</span>
+              </div>
+              {user.isAnonymous && (
+                <button
+                  onClick={switchToAdminLogin}
+                  className="group flex items-center gap-2 py-2 px-4 rounded-full border border-gray-200 text-[11px] font-black text-gray-500 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all shadow-sm"
+                >
+                  {t('admin_login_gate')} <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+                </button>
+              )}
             </div>
-            {user.isAnonymous && (
-              <button
-                onClick={switchToAdminLogin}
-                className="group flex items-center gap-2 py-2 px-4 rounded-full border border-gray-200 text-[11px] font-black text-gray-500 hover:bg-gray-900 hover:text-white hover:border-gray-900 transition-all shadow-sm"
-              >
-                {t('admin_login_gate')} <ChevronRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-              </button>
-            )}
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
       <ToastContainer
         position="top-center"
         autoClose={3000}
