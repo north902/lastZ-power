@@ -943,10 +943,20 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     const tgt = nc[key];
                     if (tgt?.isCenter && tgt.type === 'center') {
                         CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
+                        Object.keys(nc).forEach(k => {
+                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) {
+                                delete nc[k];
+                            }
+                        });
                         setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
                     } else if (tgt?.parent && tgt.type === 'center') {
                         const [pq, pr] = tgt.parent.split(',').map(Number);
                         CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
+                        Object.keys(nc).forEach(k => {
+                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) {
+                                delete nc[k];
+                            }
+                        });
                         setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
                     } else if (tgt?.parent && tgt.type === 'hq') {
                         const [pq, pr] = tgt.parent.split(',').map(Number);
