@@ -82,7 +82,7 @@ const getZoneBounds = (cq, cr) => {
 // ═══════════════════════════════════════════════════════════════
 //  Draw
 // ═══════════════════════════════════════════════════════════════
-function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false) {
+function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null) {
     const { left, right, top, bottom } = viewBounds;
     // Collect zones
     const zones = [];
@@ -112,9 +112,12 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             // Base fill & stroke
             let fill = 'rgba(248,250,252,0.08)', stroke = 'rgba(186,230,253,0.12)', sw = 0.6;
             const hasCell = cell && cell.type !== 'hq_part';
+            let isHq = cell?.type === 'hq';
+
             if (hasCell) {
                 fill = cell.color || '#3b82f6'; stroke = 'rgba(255,255,255,0.6)'; sw = cell.isCenter ? 2 : 1;
             }
+
             // Draw hex
             ctx.beginPath();
             for (let i = 0; i < 6; i++) {
@@ -122,8 +125,13 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
             }
             ctx.closePath();
-            ctx.fillStyle = fill; ctx.globalAlpha = cell?.type === 'building' ? 0.65 : 1;
-            ctx.fill(); ctx.globalAlpha = 1;
+
+            ctx.fillStyle = fill;
+            // Distinction: make building transparent, HQ gets full color with dashed border
+            ctx.globalAlpha = cell?.type === 'building' ? 0.65 : 1;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
             // Overlay each zone's alliance color (stacks on overlap)
             if (!hasCell && hexZones.length > 0) {
                 for (const z of hexZones) {
@@ -132,7 +140,11 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 }
                 stroke = hexZones.some(z => z.isActive) ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.18)';
             }
-            ctx.strokeStyle = stroke; ctx.lineWidth = sw; ctx.stroke();
+
+            ctx.strokeStyle = stroke; ctx.lineWidth = sw;
+            if (isHq) ctx.setLineDash([4, 4]); // Dashed border for HQ for differentiation
+            ctx.stroke();
+            if (isHq) ctx.setLineDash([]); // Reset dash
             if (hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r) {
                 ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
             }
@@ -214,6 +226,88 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             ctx.font = '10px serif'; ctx.fillText('⛺', cx, cy);
         }
     }
+
+    // Floating ghost for placement (Hover preview)
+    if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'text') {
+        const [hq, hr] = hoveredHex;
+        let ghostShape = [];
+        if (tool === 'hq' || tool === 'center') ghostShape = CENTER_SHAPE;
+        else if (tool === 'building' || tool === 'flex_building') ghostShape = [[0, 0]];
+
+        if (ghostShape.length > 0) {
+            let blocked = false;
+
+            if (tool === 'center') {
+                if (!activeAlliance || activeAlliance.centers[toolLevel]) blocked = true;
+                if (!blocked) blocked = ghostShape.some(([oq, or]) => cells[`${hq + oq},${hr + or}`]);
+            } else if (tool === 'hq') {
+                blocked = ghostShape.some(([oq, or]) => cells[`${hq + oq},${hr + or}`]);
+            } else if (tool === 'building') {
+                if (!activeAlliance) blocked = true;
+                else {
+                    const center = activeAlliance.centers[toolLevel];
+                    if (!center || !isInZone(hq, hr, center.q, center.r) || cells[`${hq},${hr}`]) {
+                        blocked = true;
+                    }
+                }
+            } else if (tool === 'flex_building') {
+                if (cells[`${hq},${hr}`]) blocked = true;
+            }
+
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            const ghostColor = blocked ? 'rgba(239, 68, 68, 0.8)' : (activeAlliance?.color || '#94a3b8');
+            ctx.fillStyle = ghostColor;
+
+            for (const [oq, or] of ghostShape) {
+                const tq = hq + oq, tr = hr + or;
+                const [cx, cy] = hex2px(tq, tr);
+
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
+                    i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.strokeStyle = blocked ? 'rgba(255,50,50,0.9)' : 'rgba(255,255,255,0.9)';
+                ctx.lineWidth = (oq === 0 && or === 0) ? 2.5 : 1;
+                ctx.stroke();
+
+                if (oq === 0 && or === 0) {
+                    ctx.globalAlpha = 0.9;
+                    ctx.fillStyle = 'white';
+                    ctx.font = '14px serif';
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    if (tool === 'hq') ctx.fillText('🏠', cx, cy);
+                    if (tool === 'center') ctx.fillText('🏛️', cx, cy);
+                    if (tool === 'building' || tool === 'flex_building') ctx.fillText('⛺', cx, cy);
+                    ctx.globalAlpha = 0.55;
+                }
+            }
+
+            // Draw zone preview for center tool
+            if (tool === 'center' && !blocked) {
+                const zBounds = getZoneBounds(hq, hr);
+                ctx.strokeStyle = activeAlliance ? hexAlpha(activeAlliance.color, 0.7) : 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([10, 5]);
+                ctx.strokeRect(zBounds.left, zBounds.top, zBounds.right - zBounds.left, zBounds.bottom - zBounds.top);
+                ctx.setLineDash([]);
+
+                // Draw a label for the preview zone
+                ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+                ctx.globalAlpha = 0.9;
+                ctx.fillStyle = activeAlliance ? hexAlpha(activeAlliance.color, 0.9) : 'rgba(255,255,255,0.9)';
+                ctx.fillText(`預覽 Lv${toolLevel} 領地範圍`, zBounds.left + 8, zBounds.top - 4);
+                ctx.globalAlpha = 0.55;
+            }
+
+            ctx.restore();
+        }
+    }
+
     // Floating text
     const TEXT_SIZES = { S: 14, M: 24, L: 36 };
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -243,7 +337,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [showShared, setShowShared] = useState(false);
     const [sharedMaps, setSharedMaps] = useState([]);
     const [sharedLoading, setSharedLoading] = useState(false);
-    const [textColor, setTextColor] = useState('#ffffff');
+    const [textColor, setTextColor] = useState(null);
     const [textSize, setTextSize] = useState('M');
     const [textInput, setTextInput] = useState(null);
 
@@ -256,7 +350,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const isDragging = useRef(false); const isPainting = useRef(false);
     const lastPos = useRef({ x: 0, y: 0 }); const dragStart = useRef({ x: 0, y: 0 });
     const lastPaintHex = useRef(null); const draggingText = useRef(null);
-    const textColorRef = useRef('#ffffff'); const textSizeRef = useRef('M');
+    const textColorRef = useRef(null); const textSizeRef = useRef('M');
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
 
@@ -511,7 +605,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             left: -offsetRef.current.x / z, right: (rect.width - offsetRef.current.x) / z,
             top: -offsetRef.current.y / z, bottom: (rect.height - offsetRef.current.y) / z
         };
-        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current);
+        const activeA = alliancesRef.current.find(a => a.id === activeIdRef.current);
+        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA);
         ctx.restore();
     };
 
@@ -593,11 +688,26 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
     };
 
+    const darkenHex = (hex, amount = -40) => {
+        if (!hex || !hex.match(/^#[0-9a-fA-F]{6}$/)) return hex;
+        let r = Math.max(0, parseInt(hex.slice(1, 3), 16) + amount);
+        let g = Math.max(0, parseInt(hex.slice(3, 5), 16) + amount);
+        let b = Math.max(0, parseInt(hex.slice(5, 7), 16) + amount);
+        return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+    };
+
     const applyTool = (q, r, wx, wy) => {
         const t = toolRef.current, lv = toolLevelRef.current, aid = activeIdRef.current;
         const alliance = alliancesRef.current.find(a => a.id === aid);
+
+        let activeColor = textColorRef.current;
+        if (!activeColor) {
+            if (t === 'hq') activeColor = darkenHex(alliance?.color) || '#64748b';
+            else activeColor = alliance?.color || '#94a3b8';
+        }
+
         if (t === 'text') {
-            setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current, size: textSizeRef.current, editId: null });
+            setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current || '#ffffff', size: textSizeRef.current, editId: null });
             return;
         }
         setCells(prev => {
@@ -645,13 +755,13 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 } else {
                     // Flex building: no zone check, no quota check, but NO overlap
                     if (nc[key]) return prev;
-                    nc[key] = { type: 'flex_building', allianceId: aid, level: lv, color: alliance?.color || '#94a3b8' };
+                    nc[key] = { type: 'flex_building', allianceId: aid, level: lv, color: activeColor };
                 }
             } else if (t === 'hq') {
                 const blocked = HQ_SHAPE.some(([oq, or]) => nc[`${q + oq},${r + or}`]);
                 if (blocked) return prev;
                 HQ_SHAPE.forEach(([oq, or]) => {
-                    nc[`${q + oq},${r + or}`] = { type: 'hq', color: alliance?.color || '#94a3b8', parent: key, isCenter: oq === 0 && or === 0 };
+                    nc[`${q + oq},${r + or}`] = { type: 'hq', color: activeColor, parent: key, isCenter: oq === 0 && or === 0 };
                 });
             }
             return nc;
@@ -684,6 +794,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
                         <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
                     </div>
+
                     {/* Level selector */}
                     {(tool === 'center' || tool === 'building') && (
                         <div className="flex bg-slate-800 rounded-lg p-1 gap-0.5">
@@ -695,23 +806,35 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                             ))}
                         </div>
                     )}
-                    {tool === 'text' && (
+                    {(tool === 'text' || tool === 'hq' || tool === 'flex_building') && (
                         <>
-                            <div className="flex gap-1.5">
-                                {['#ffffff', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'].map(c => (
-                                    <button key={c} onClick={() => setTextColor(c)}
-                                        className={`w-5 h-5 rounded-full border-2 transition-transform ${textColor === c ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
-                                        style={{ backgroundColor: c }} />
-                                ))}
-                            </div>
-                            <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
-                                {[['S', '小'], ['M', '中'], ['L', '大']].map(([k, label]) => (
-                                    <button key={k} onClick={() => setTextSize(k)}
-                                        className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${textSize === k ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                                        {label}
+                            <div className="flex gap-1.5 items-center bg-slate-800 rounded-lg p-1">
+                                {(tool === 'hq' || tool === 'flex_building') && activeAlliance && (
+                                    <button onClick={() => setTextColor(null)}
+                                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-transform ${!textColor ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                                        style={{ backgroundColor: activeAlliance.color }} title="跟隨聯盟顏色">
+                                        <Shield size={10} color="#fff" />
                                     </button>
-                                ))}
+                                )}
+                                {['#ffffff', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#64748b'].map(c => {
+                                    const isSelected = textColor === c || (!textColor && tool === 'text' && c === '#ffffff');
+                                    return (
+                                        <button key={c} onClick={() => setTextColor(c)}
+                                            className={`w-5 h-5 rounded-full border-2 transition-transform ${isSelected ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                                            style={{ backgroundColor: c }} />
+                                    );
+                                })}
                             </div>
+                            {tool === 'text' && (
+                                <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
+                                    {[['S', '小'], ['M', '中'], ['L', '大']].map(([k, label]) => (
+                                        <button key={k} onClick={() => setTextSize(k)}
+                                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${textSize === k ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </>
                     )}
                     <div className="h-6 w-px bg-slate-700" />

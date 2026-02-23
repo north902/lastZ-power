@@ -78,7 +78,7 @@ const FISHPOND_BORDERS = {
 // ═══════════════════════════════════════════════════════════════
 //  Shared draw logic (used by both viewport + full-map export)
 // ═══════════════════════════════════════════════════════════════
-function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex) {
+function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex, tool = 'hand', color = '#ffffff') {
     for (let q = -radius; q <= radius; q++) {
         for (let r = -radius; r <= radius; r++) {
             if (Math.abs(-q - r) > radius) continue;
@@ -173,6 +173,59 @@ function drawMap(ctx, mode, cs, radius, showCoords, hoveredHex) {
             if (mode === 'fishpond' && q === 0 && r === 0 && !cell) { ctx.font = '20px serif'; ctx.fillText('🐉', cx, cy); }
         }
     }
+    // Floating ghost for placement (Hover preview)
+    if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'border' && tool !== 'text') {
+        const [hq, hr] = hoveredHex;
+        let ghostShape = [];
+        if (tool === 'hq') ghostShape = HQ_SHAPE;
+        else if (tool === 'cannon') ghostShape = CANNON_SHAPE;
+        else if (tool === 'brush') ghostShape = [[0, 0]];
+
+        if (ghostShape.length > 0) {
+            // Check if blocked
+            const blocked = ghostShape.some(([oq, or]) => {
+                const tq = hq + oq, tr = hr + or, tk = `${tq},${tr}`;
+                if (cs[tk] && cs[tk].type !== 'color' && cs[tk].type !== 'border') return true;
+                if (mode === 'svs' && hexDist(tq, tr) <= SVS_ICE) return true;
+                if (mode === 'fishpond' && DRAGON_ZONE.has(tk)) return true;
+                return false;
+            });
+
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            const ghostColor = blocked ? 'rgba(239, 68, 68, 0.8)' : color;
+            ctx.fillStyle = ghostColor;
+
+            for (const [oq, or] of ghostShape) {
+                const tq = hq + oq, tr = hr + or;
+                const [cx, cy] = hex2px(tq, tr);
+
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) {
+                    const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
+                    i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
+                }
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.strokeStyle = blocked ? 'rgba(255,50,50,0.9)' : 'rgba(255,255,255,0.9)';
+                ctx.lineWidth = (oq === 0 && or === 0) ? 2.5 : 1;
+                ctx.stroke();
+
+                if (oq === 0 && or === 0) {
+                    ctx.globalAlpha = 0.9;
+                    ctx.fillStyle = 'white';
+                    ctx.font = '14px serif';
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                    if (tool === 'hq') ctx.fillText('🏠', cx, cy);
+                    if (tool === 'cannon') ctx.fillText('⚔️', cx, cy);
+                    ctx.globalAlpha = 0.55;
+                }
+            }
+            ctx.restore();
+        }
+    }
+
     // Render floating text
     const TEXT_SIZES = { S: 14, M: 24, L: 36 };
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -472,7 +525,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
         ctx.scale(dpr, dpr);
         ctx.translate(offsetRef.current.x, offsetRef.current.y);
         ctx.scale(zoomRef.current, zoomRef.current);
-        drawMap(ctx, mode, cellsRef.current, radius, showCoordsRef.current, hoveredHex.current);
+        drawMap(ctx, mode, cellsRef.current, radius, showCoordsRef.current, hoveredHex.current, toolRef.current, colorRef.current);
         ctx.restore();
     };
 
