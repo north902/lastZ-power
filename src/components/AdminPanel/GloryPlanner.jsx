@@ -666,6 +666,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         for (const a of as) {
             output.push(`【${a.name}】`);
 
+            const allianceItems = [];
             // Output centers and buildings
             for (const key of Object.keys(cs)) {
                 const cell = cs[key];
@@ -682,13 +683,38 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
 
                 let title = '';
-                if (cell.type === 'center') title = `Lv${cell.level} 聯盟中心`;
-                else if (cell.type === 'hq') title = `總部 ${cell.label || ''}`;
-                else if (cell.type === 'building') title = `Lv${cell.level} 小建築`;
-                else if (cell.type === 'flex_building') title = `彈性建築`;
+                let typeOrder = 99;
 
-                output.push(`- ${title}: (${gx}, ${gy})`);
+                if (cell.type === 'center') {
+                    title = `Lv${cell.level} 聯盟中心`;
+                    typeOrder = 1;
+                } else if (cell.type === 'hq') {
+                    title = `總部 ${cell.label || ''}`;
+                    typeOrder = 2;
+                } else if (cell.type === 'building') {
+                    title = `Lv${cell.level} 小建築`;
+                    typeOrder = 3;
+                } else if (cell.type === 'flex_building') {
+                    title = `彈性建築`;
+                    typeOrder = 4;
+                }
+
+                if (title) {
+                    allianceItems.push({ title, gx, gy, typeOrder });
+                }
             }
+
+            // 排列順序: 種類優先(中心 > HQ > 小建築)，同種類則上到下 (gy遞增)，左到右 (gx遞增)
+            allianceItems.sort((a, b) => {
+                if (a.typeOrder !== b.typeOrder) return a.typeOrder - b.typeOrder;
+                if (a.gy !== b.gy) return a.gy - b.gy;
+                return a.gx - b.gx;
+            });
+
+            allianceItems.forEach(item => {
+                output.push(`- ${item.title}: (${item.gx}, ${item.gy})`);
+            });
+
             output.push('');
         }
 
@@ -700,12 +726,18 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
         if (unaffiliatedHQs.length > 0) {
             output.push('【未分配聯盟的總部】');
+            const unaffiliatedItems = [];
             unaffiliatedHQs.forEach(key => {
                 const c = cs[key];
                 const [q, r] = key.split(',').map(Number);
                 const gy = r - r0 + y0;
                 const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
-                output.push(`- 總部 ${c.label || ''}: (${gx}, ${gy})`);
+                unaffiliatedItems.push({ title: `總部 ${c.label || ''}`, gx, gy });
+            });
+
+            unaffiliatedItems.sort((a, b) => a.gy !== b.gy ? a.gy - b.gy : a.gx - b.gx);
+            unaffiliatedItems.forEach(item => {
+                output.push(`- ${item.title}: (${item.gx}, ${item.gy})`);
             });
         }
 
