@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
-    Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle
+    Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle, Eraser
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -1074,7 +1074,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={15} />} label="總部" />
                         <ToolBtn active={tool === 'origin'} onClick={() => setTool('origin')} icon={<MapPin size={15} />} label="坐標校正" />
                         <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
-                        <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Trash2 size={15} />} label="橡皮擦" />
+                        <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Eraser size={15} />} label="橡皮擦" />
                     </div>
                     {(tool === 'center' || tool === 'building') && (
                         <div className="flex bg-slate-800 rounded-lg p-1 gap-0.5">
@@ -1413,7 +1413,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                             <div><strong className="text-slate-200 flex items-center gap-1"><Home size={14} /> 總部 (HQ)</strong>：佔地七格的玩家基地。放置時會標示總部圖形。</div>
                                             <div><strong className="text-slate-200 flex items-center gap-1"><MapPin size={14} /> 坐標校正</strong>：點擊圖上一格並輸入對應的遊戲座標，讓圖板座標系完美與遊戲同步！</div>
                                             <div><strong className="text-slate-200 flex items-center gap-1"><Type size={14} /> 文字</strong>：有 S/M/L 大小。點擊放置文字，雙擊文字本身可編輯內容。</div>
-                                            <div><strong className="text-slate-200 flex items-center gap-1"><Trash2 size={14} /> 橡皮擦</strong>：點擊刪除元素。若刪除聯盟中心，系統會一併清除其專屬小建築。</div>
+                                            <div><strong className="text-slate-200 flex items-center gap-1"><Eraser size={14} /> 橡皮擦</strong>：點擊刪除元素。若刪除聯盟中心，系統會一併清除其專屬小建築。</div>
                                         </div>
                                     </section>
 
