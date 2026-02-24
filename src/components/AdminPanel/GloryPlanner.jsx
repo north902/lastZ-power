@@ -50,7 +50,7 @@ const getZoneHexes = (cq, cr) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-//  HQ Blocking Algorithm (Greedy Dominating Set)
+//  HQ Blocking Algorithm (Greedy + Redundancy Removal)
 //  Only blocks HQ positions where ALL 7 footprint hexes are
 //  inside the zone — minimises buildings needed.
 // ═══════════════════════════════════════════════════════════════
@@ -84,7 +84,6 @@ const computeHQBlockingSet = (cq, cr, existingCells) => {
     });
 
     // ── Phase 1: Greedy ──
-    // Track coverCnt[idx] = number of chosen blockers that cover placement idx
     const coverCnt = new Array(hqPlacements.length).fill(0);
     const firstCovered = new Array(hqPlacements.length).fill(false);
 
@@ -107,11 +106,10 @@ const computeHQBlockingSet = (cq, cr, existingCells) => {
         score.delete(bestKey);
 
         for (const idx of (hexToIdx.get(bestKey) || [])) {
-            coverCnt[idx]++;           // always increment — needed for redundancy removal
+            coverCnt[idx]++;
             if (!firstCovered[idx]) {
                 firstCovered[idx] = true;
                 totalUnblocked--;
-                // Decrement score of every other hex in this newly-covered placement
                 for (const k2 of hqPlacements[idx]) {
                     if (score.has(k2)) {
                         const ns = score.get(k2) - 1;
@@ -124,9 +122,6 @@ const computeHQBlockingSet = (cq, cr, existingCells) => {
     }
 
     // ── Phase 2: Redundancy removal ──
-    // A blocker is redundant if every placement it touches is still covered ≥1
-    // after removing it (i.e., coverCnt[idx] >= 2 for all its placements).
-    // Repeat until no more can be removed.
     let improved = true;
     while (improved) {
         improved = false;
@@ -531,6 +526,17 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
         const blockerKeys = computeHQBlockingSet(cq, cr, cellsRef.current);
 
+        // ── 由近到遠排序：配額不足時優先保護聯盟中心附近 ──
+        const hexDist = (q, r) => {
+            const dq = q - cq, dr = r - cr;
+            return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+        };
+        blockerKeys.sort((a, b) => {
+            const [aq, ar] = a.split(',').map(Number);
+            const [bq, br] = b.split(',').map(Number);
+            return hexDist(aq, ar) - hexDist(bq, br);
+        });
+
         if (blockerKeys.length === 0) {
             showToast('✅ 區域已完全封鎖，無需額外建築');
             return;
@@ -544,7 +550,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             const ok = window.confirm(
                 `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，\n` +
                 `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。\n\n` +
-                `要用盡剩餘配額盡量封鎖嗎？`
+                `要用盡剩餘配額盡量封鎖嗎？（會從聯盟中心往外優先放置）`
             );
             if (!ok) return;
         }
@@ -562,7 +568,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 placed++;
             }
             if (placed < blockerKeys.length) {
-                showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，仍有部分HQ位置未封鎖`);
+                showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
             } else {
                 showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
             }
@@ -660,65 +666,44 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         const cs = cellsRef.current;
         const as = alliancesRef.current;
 
-        // Group by alliance and filter out text/colors/etc.
         const output = [];
 
         for (const a of as) {
             output.push(`【${a.name}】`);
 
             const allianceItems = [];
-            // Output centers and buildings
             for (const key of Object.keys(cs)) {
                 const cell = cs[key];
                 if (!cell || cell.allianceId !== a.id) continue;
-
-                // Only log center of HQ or Centers
                 if ((cell.type === 'center' || cell.type === 'hq') && !cell.isCenter) continue;
 
                 const [q, r] = key.split(',').map(Number);
                 if (isNaN(q) || isNaN(r)) continue;
 
-                // Calculate real game coordinates
                 const gy = r - r0 + y0;
                 const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
 
                 let title = '';
                 let typeOrder = 99;
 
-                if (cell.type === 'center') {
-                    title = `Lv${cell.level} 聯盟中心`;
-                    typeOrder = 1;
-                } else if (cell.type === 'hq') {
-                    title = `總部 ${cell.label || ''}`;
-                    typeOrder = 2;
-                } else if (cell.type === 'building') {
-                    title = `Lv${cell.level} 小建築`;
-                    typeOrder = 3;
-                } else if (cell.type === 'flex_building') {
-                    title = `彈性建築`;
-                    typeOrder = 4;
-                }
+                if (cell.type === 'center') { title = `Lv${cell.level} 聯盟中心`; typeOrder = 1; }
+                else if (cell.type === 'hq') { title = `總部 ${cell.label || ''}`; typeOrder = 2; }
+                else if (cell.type === 'building') { title = `Lv${cell.level} 小建築`; typeOrder = 3; }
+                else if (cell.type === 'flex_building') { title = `彈性建築`; typeOrder = 4; }
 
-                if (title) {
-                    allianceItems.push({ title, gx, gy, typeOrder });
-                }
+                if (title) allianceItems.push({ title, gx, gy, typeOrder });
             }
 
-            // 排列順序: 種類優先(中心 > HQ > 小建築)，同種類則上到下 (gy遞增)，左到右 (gx遞增)
             allianceItems.sort((a, b) => {
                 if (a.typeOrder !== b.typeOrder) return a.typeOrder - b.typeOrder;
                 if (a.gy !== b.gy) return a.gy - b.gy;
                 return a.gx - b.gx;
             });
 
-            allianceItems.forEach(item => {
-                output.push(`- ${item.title}: (${item.gx}, ${item.gy})`);
-            });
-
+            allianceItems.forEach(item => { output.push(`- ${item.title}: (${item.gx}, ${item.gy})`); });
             output.push('');
         }
 
-        // Output unaffiliated HQs
         const unaffiliatedHQs = Object.keys(cs).filter(k => {
             const c = cs[k];
             return c && c.type === 'hq' && c.isCenter && !c.allianceId;
@@ -726,26 +711,20 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
         if (unaffiliatedHQs.length > 0) {
             output.push('【未分配聯盟的總部】');
-            const unaffiliatedItems = [];
+            const items = [];
             unaffiliatedHQs.forEach(key => {
                 const c = cs[key];
                 const [q, r] = key.split(',').map(Number);
                 const gy = r - r0 + y0;
                 const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
-                unaffiliatedItems.push({ title: `總部 ${c.label || ''}`, gx, gy });
+                items.push({ title: `總部 ${c.label || ''}`, gx, gy });
             });
-
-            unaffiliatedItems.sort((a, b) => a.gy !== b.gy ? a.gy - b.gy : a.gx - b.gx);
-            unaffiliatedItems.forEach(item => {
-                output.push(`- ${item.title}: (${item.gx}, ${item.gy})`);
-            });
+            items.sort((a, b) => a.gy !== b.gy ? a.gy - b.gy : a.gx - b.gx);
+            items.forEach(item => { output.push(`- ${item.title}: (${item.gx}, ${item.gy})`); });
         }
 
         const textToCopy = output.join('\n').trim();
-        if (!textToCopy) {
-            showToast('⚠️ 沒有可匯出的建築');
-            return;
-        }
+        if (!textToCopy) { showToast('⚠️ 沒有可匯出的建築'); return; }
 
         setExportTextData(textToCopy);
         setShowExportList(true);
@@ -878,6 +857,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
         return `(${q}, ${r})`;
     }, []);
+
     const handleMouseDown = (e) => {
         dragStart.current = { x: e.clientX, y: e.clientY };
         const [wx, wy] = getWorldPos(e);
@@ -925,11 +905,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         const p = hoveredHex.current;
         if (!p || p[0] !== hq || p[1] !== hr) {
             hoveredHex.current = [hq, hr];
-
-            // ✅ 新增：右上角顯示座標
             const label = getHoverCoordLabel(hq, hr);
             setHoverCoordText(prev => (prev === label ? prev : label));
-
             requestDraw();
         }
     };
@@ -994,18 +971,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     if (tgt?.isCenter && tgt.type === 'center') {
                         CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
                         Object.keys(nc).forEach(k => {
-                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) {
-                                delete nc[k];
-                            }
+                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
                         });
                         setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
                     } else if (tgt?.parent && tgt.type === 'center') {
                         const [pq, pr] = tgt.parent.split(',').map(Number);
                         CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
                         Object.keys(nc).forEach(k => {
-                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) {
-                                delete nc[k];
-                            }
+                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
                         });
                         setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
                     } else if (tgt?.parent && tgt.type === 'hq') {
@@ -1213,7 +1186,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                                         填滿
                                                     </button>
                                                     <button onClick={(e) => { e.stopPropagation(); antiHQFill(a.id, lv); }}
-                                                        title="自動放置最少建築，封鎖區域內所有可能的總部位置"
+                                                        title="自動放置最少建築，封鎖區域內所有可能的總部位置（由中心往外放）"
                                                         className="px-1.5 py-0.5 bg-rose-600/20 text-rose-400 rounded text-[9px] hover:bg-rose-600/30">
                                                         🛡️防總
                                                     </button>
@@ -1229,7 +1202,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     {alliances.length === 0 && <p className="text-slate-600 text-[10px] text-center py-4">點擊上方新增聯盟</p>}
                 </div>
 
-                {/* Right Panel for Export List (Toggled) */}
                 {showExportList && (
                     <div className="w-64 bg-slate-900 border-r border-slate-800 overflow-y-auto flex flex-col flex-shrink-0 z-10 shadow-xl">
                         <div className="p-3 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900/90 backdrop-blur">
@@ -1245,11 +1217,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 className="w-full h-[500px] bg-slate-950 text-slate-300 text-xs p-2 rounded outline-none border border-slate-800 resize-none font-mono tracking-wider leading-relaxed"
                             />
                             <button
-                                onClick={() => {
-                                    navigator.clipboard.writeText(exportTextData);
-                                    showToast('📋 已重新複製');
-                                }}
-                                className="w-full mt-3 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-COLORS"
+                                onClick={() => { navigator.clipboard.writeText(exportTextData); showToast('📋 已重新複製'); }}
+                                className="w-full mt-3 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-colors"
                             >
                                 <Copy size={12} /> 重新複製到剪貼簿
                             </button>
@@ -1266,7 +1235,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                             isPainting.current = false;
                             draggingText.current = null;
                             hoveredHex.current = null;
-                            setHoverCoordText('');   // ✅ 新增：離開畫布就隱藏
+                            setHoverCoordText('');
                             requestDraw();
                         }}
                         onContextMenu={e => e.preventDefault()} />
@@ -1402,7 +1371,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                             <li><strong className="text-slate-200">配額檢視與快捷按鈕</strong>：放置聯盟中心後，左側列表會即時顯示小建築的配額（例如 0/730）。列表內提供【填滿】(一鍵鋪滿整個領地) 與【🛡️防總】操作。</li>
                                         </ul>
                                     </section>
-
                                     <section>
                                         <h4 className="text-blue-400 font-bold mb-2 flex items-center gap-2"><MousePointer2 size={16} /> 二、 工具列全解析</h4>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 text-slate-400">
@@ -1416,16 +1384,15 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                             <div><strong className="text-slate-200 flex items-center gap-1"><Eraser size={14} /> 橡皮擦</strong>：點擊刪除元素。若刪除聯盟中心，系統會一併清除其專屬小建築。</div>
                                         </div>
                                     </section>
-
                                     <section>
                                         <h4 className="text-emerald-400 font-bold mb-2 flex items-center gap-2"><Shield size={16} /> 三、 進階戰術 (防總部封鎖)</h4>
                                         <ul className="list-disc pl-5 space-y-1 text-slate-400">
                                             <li>在左側聯盟列表中，若該聯盟已放置中心，會出現 <strong className="text-rose-400">🛡️防總</strong> 按鈕。</li>
-                                            <li>點擊後，系統會自動在該中心的 27×27 領地內，計算出<b>最少且最佳的小建築放置位置</b>，完美封鎖敵方所有能飛入總部的空地 (Anti-HQ 最佳化)！</li>
+                                            <li>點擊後，系統會自動在該中心的 27×27 領地內，計算出<b>最少且最佳的小建築放置位置</b>，完美封鎖敵方所有能飛入總部的空地。</li>
+                                            <li><strong className="text-slate-200">由中心往外放置</strong>：建築會從聯盟中心開始往外擴散，配額不足時優先保護中心區域。</li>
                                             <li>實時座標顯示：打開右上角「座標」開關，滑鼠移動時右上角會顯示該格的遊戲實時座標。</li>
                                         </ul>
                                     </section>
-
                                     <section>
                                         <h4 className="text-purple-400 font-bold mb-2 flex items-center gap-2"><Save size={16} /> 四、 存檔、座標與圖片匯出</h4>
                                         <ul className="list-disc pl-5 space-y-1 text-slate-400">
@@ -1435,7 +1402,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                             <li><strong className="text-slate-200">☁️ 雲端共享 (管理員功能)</strong>：擁有權限的管理員可以點擊「發佈到共享區」，將地圖上傳到伺服器；其他人可以從「☁️ 共享列表」選擇並複製這些戰術地圖來使用。</li>
                                         </ul>
                                     </section>
-
                                     <section>
                                         <h4 className="text-amber-500 font-bold mb-2 flex items-center gap-2"><Navigation size={16} /> 五、 常用快捷與操作技巧</h4>
                                         <ul className="list-disc pl-5 space-y-1 text-slate-400">
@@ -1457,7 +1423,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <p>🏛️ <b>聯盟中心</b>：放置後自動產生 27×27 區域</p>
                         <p>⛺ <b>小建築</b>：拖曳快速佈置 ┃ 📁 <b>匯出/匯入</b></p>
                         <p>🔤 <b>文字</b>：點擊放置標註 ┃ 雙擊編輯內容</p>
-                        <p>🛡️ <b>防總</b>：最少建築封鎖所有內部HQ位置</p>
+                        <p>🛡️ <b>防總</b>：由中心往外封鎖所有內部HQ位置</p>
                     </div>
                 </div>
             </div>
