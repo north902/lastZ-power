@@ -408,6 +408,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [alliances, setAlliances] = useState([]);
     const [activeAllianceId, setActiveAllianceId] = useState(null);
     const [cells, setCells] = useState({});
+    const [buildingCounts, setBuildingCounts] = useState({}); // F03: { "${aid}_${lv}": number }
     const [tool, setTool] = useState('hand');
     const [toolLevel, setToolLevel] = useState(1);
     const [zoom, setZoom] = useState(0.5);
@@ -453,7 +454,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
     const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-    useEffect(() => { cellsRef.current = cells; pushHistory(cells); requestDraw(); }, [cells]);
+    useEffect(() => { cellsRef.current = cells; pushHistory(cells); setBuildingCounts(recomputeCounts(cells)); requestDraw(); }, [cells]);
     useEffect(() => { alliancesRef.current = alliances; requestDraw(); }, [alliances]);
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { toolLevelRef.current = toolLevel; }, [toolLevel]);
@@ -462,8 +463,19 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
     useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
 
+    // F03: 一次掃描產生計數 map，供 countBuildings 使用
+    const recomputeCounts = (cellsObj) => {
+        const counts = {};
+        for (const v of Object.values(cellsObj)) {
+            if (v?.type === 'building' && v.allianceId && v.level) {
+                const k = `${v.allianceId}_${v.level}`;
+                counts[k] = (counts[k] || 0) + 1;
+            }
+        }
+        return counts;
+    };
     const getQuota = (alliance, lv) => alliance.centers[lv] ? alliance.memberCount * LEVEL_MULTI[lv] : 0;
-    const countBuildings = (aid, lv) => Object.values(cellsRef.current).filter(c => c?.type === 'building' && c.allianceId === aid && c.level === lv).length;
+    const countBuildings = (aid, lv) => buildingCounts[`${aid}_${lv}`] ?? 0; // F03: O(1) 讀取
 
     const addAlliance = () => {
         const name = prompt('聯盟名稱（例如 [KTX]）：');
@@ -596,13 +608,17 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
 
     const saveLocal = () => {
-        localStorage.setItem('glory_planner', JSON.stringify({ cells: cellsRef.current, alliances: alliancesRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        localStorage.setItem('glory_planner', JSON.stringify({ version: 2, cells: cellsRef.current, alliances: alliancesRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
         showToast('💾 已儲存！');
     };
+    // F06-2: migrate舊格式到新格式，目前 v1→v2 只需補上 version 欄位
+    const migrate_v1_to_v2 = (d) => ({ version: 2, cells: d.cells || {}, alliances: d.alliances || [], zoom: d.zoom, offset: d.offset });
     const loadLocal = () => {
         try {
-            const d = JSON.parse(localStorage.getItem('glory_planner'));
-            if (!d) return false;
+            const raw = JSON.parse(localStorage.getItem('glory_planner'));
+            if (!raw) return false;
+            // F06-2: 無版號或版號過舊 → 先 migrate
+            const d = (!raw.version || raw.version < 2) ? migrate_v1_to_v2(raw) : raw;
             if (d.cells) { skipHistory.current = true; setCells(d.cells); }
             if (d.alliances) { setAlliances(d.alliances); setActiveAllianceId(d.alliances[0]?.id || null); }
             if (d.zoom) { zoomRef.current = d.zoom; setZoom(d.zoom); }
