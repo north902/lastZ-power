@@ -163,7 +163,7 @@ const getZoneBounds = (cq, cr) => {
     };
 };
 
-function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null) {
+function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
     const { left, right, top, bottom } = viewBounds;
     const zones = [];
     for (const a of alliances) {
@@ -221,6 +221,16 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
             if (isHq) ctx.setLineDash([]);
             if (hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r) {
                 ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
+            }
+            // Highlight ring for newly placed antiHQ blockers
+            if (highlightKeys && highlightKeys.has(key)) {
+                const hlAlpha = Math.max(0, 1 - highlightAge / 2000);
+                ctx.fillStyle = `rgba(251,191,36,${hlAlpha * 0.35})`;
+                ctx.fill();
+                ctx.strokeStyle = `rgba(251,191,36,${hlAlpha})`;
+                ctx.lineWidth = 2.5;
+                ctx.setLineDash([]);
+                ctx.stroke();
             }
         }
     }
@@ -429,6 +439,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const textColorRef = useRef(null); const textSizeRef = useRef('M');
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
+    const highlightRef = useRef(null); // { keys: Set<string>, startTime: number } | null
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
     const pushHistory = (nc) => {
@@ -555,6 +566,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             if (!ok) return;
         }
 
+        const newlyPlaced = new Set();
         setCells(prev => {
             const nc = { ...prev };
             let placed = 0;
@@ -565,12 +577,18 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 const [q, r] = k.split(',').map(Number);
                 if (!isInZone(q, r, cq, cr)) continue;
                 nc[k] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
+                newlyPlaced.add(k);
                 placed++;
             }
             if (placed < blockerKeys.length) {
                 showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
             } else {
                 showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
+            }
+            // Kick off highlight animation for newly placed blockers
+            if (newlyPlaced.size > 0) {
+                highlightRef.current = { keys: newlyPlaced, startTime: Date.now() };
+                requestDraw();
             }
             return nc;
         });
@@ -775,9 +793,65 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         tCtx.translate(w / 2 - centerX, h / 2 - centerY);
         const exportBounds = { left: centerX - w / 2, right: centerX + w / 2, top: centerY - h / 2, bottom: centerY + h / 2 };
         drawGloryMap(tCtx, cs, as, null, null, exportBounds, false);
+
+        // ── Legend panel ──
+        const LEGEND_H = 48;
+        const LEGEND_PAD = 16;
+        // Expand canvas to fit legend
+        const lCanvas = document.createElement('canvas');
+        lCanvas.width = tmpCanvas.width;
+        lCanvas.height = tmpCanvas.height + LEGEND_H * 2;
+        const lCtx = lCanvas.getContext('2d');
+        // Background
+        lCtx.fillStyle = '#0f172a';
+        lCtx.fillRect(0, 0, lCanvas.width, lCanvas.height);
+        // Copy map
+        lCtx.drawImage(tmpCanvas, 0, 0);
+        // Separator line
+        const sepY = tmpCanvas.height + 2;
+        lCtx.fillStyle = '#1e3a5f';
+        lCtx.fillRect(0, sepY, lCanvas.width, 2);
+        // Draw legend entries
+        lCtx.save();
+        lCtx.scale(2, 2);  // match the 2x scale used for map
+        const legY = h + LEGEND_H / 2 + 4;
+        const itemW = 160;
+        const totalW = as.length * itemW;
+        let legX = (w - totalW) / 2;
+        for (const a of as) {
+            const lvLabels = [1, 2, 3].filter(lv => a.centers[lv]).map(lv => `Lv${lv}`).join('/');
+            if (!lvLabels) { legX += itemW; continue; }
+            // Color circle
+            lCtx.beginPath();
+            lCtx.arc(legX + 10, legY, 8, 0, Math.PI * 2);
+            lCtx.fillStyle = a.color;
+            lCtx.fill();
+            lCtx.strokeStyle = 'rgba(255,255,255,0.6)';
+            lCtx.lineWidth = 1;
+            lCtx.stroke();
+            // Alliance name
+            lCtx.font = 'bold 12px sans-serif';
+            lCtx.fillStyle = '#ffffff';
+            lCtx.textAlign = 'left';
+            lCtx.textBaseline = 'middle';
+            lCtx.fillText(a.name, legX + 24, legY - 5);
+            // Lv label
+            lCtx.font = '10px sans-serif';
+            lCtx.fillStyle = 'rgba(148,163,184,0.9)';
+            lCtx.fillText(lvLabels, legX + 24, legY + 8);
+            legX += itemW;
+        }
+        // Date stamp (right aligned)
+        lCtx.font = '10px monospace';
+        lCtx.fillStyle = 'rgba(100,116,139,0.8)';
+        lCtx.textAlign = 'right';
+        lCtx.textBaseline = 'middle';
+        lCtx.fillText(new Date().toLocaleDateString('zh-TW'), w - LEGEND_PAD, legY);
+        lCtx.restore();
+
         const link = document.createElement('a');
         link.download = `glory-map-${new Date().toISOString().slice(0, 10)}.png`;
-        link.href = tmpCanvas.toDataURL('image/png');
+        link.href = lCanvas.toDataURL('image/png');
         link.click();
         showToast('📸 已匯出完整地圖！');
     };
@@ -838,7 +912,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             top: -offsetRef.current.y / z, bottom: (rect.height - offsetRef.current.y) / z
         };
         const activeA = alliancesRef.current.find(a => a.id === activeIdRef.current);
-        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null);
+        const hl = highlightRef.current;
+        const hlAge = hl ? (Date.now() - hl.startTime) : 0;
+        if (hl && hlAge >= 2000) highlightRef.current = null;
+        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+        // Keep animating while highlight is active
+        if (hl && hlAge < 2000) requestAnimationFrame(draw);
         ctx.restore();
     };
 
