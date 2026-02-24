@@ -444,6 +444,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
     const pushHistory = (nc) => {
         if (skipHistory.current) { skipHistory.current = false; return; }
+        if (isPainting.current) return; // F02-1: 拖曳中不記，mouseUp 再一次性推入
         const h = historyRef.current.slice(0, historyIdx.current + 1);
         h.push(JSON.parse(JSON.stringify(nc)));
         if (h.length > MAX_HISTORY) h.shift();
@@ -991,7 +992,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
     const handleMouseUp = () => {
         if (draggingText.current) { draggingText.current = null; requestDraw(); }
+        const wasPainting = isPainting.current; // F02-1: 記錄是否剛結束拖曳
         isDragging.current = false; setIsPanning(false); isPainting.current = false; lastPaintHex.current = null;
+        if (wasPainting) pushHistory(cellsRef.current); // 整段拖曳只推一次
     };
     const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
@@ -1311,10 +1314,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         onClick={handleClick} onDoubleClick={handleDoubleClick}
                         onMouseLeave={() => {
                             isDragging.current = false;
+                            const wasPainting = isPainting.current;
                             isPainting.current = false;
                             draggingText.current = null;
                             hoveredHex.current = null;
                             setHoverCoordText('');
+                            if (wasPainting) pushHistory(cellsRef.current); // F02-1: 滑鼠離開也補推
                             requestDraw();
                         }}
                         onContextMenu={e => e.preventDefault()} />
