@@ -161,8 +161,9 @@ const getZoneBounds = (cq, cr) => {
     };
 };
 
-function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
-    const cells = hexCells; // A05: alias for internal use
+// A01: Background layer - hex grid, zones, buildings, text labels (redraws only on data change)
+function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activeId, viewBounds, showCoords = false) {
+    const cells = hexCells;
     const { left, right, top, bottom } = viewBounds;
     const zones = [];
     for (const a of alliances) {
@@ -175,6 +176,7 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
     }
     const rMin = Math.floor((top - HEX_R * 2) / (HEX_R * 1.5));
     const rMax = Math.ceil((bottom + HEX_R * 2) / (HEX_R * 1.5));
+    // Hex grid + buildings
     for (let r = rMin; r <= rMax; r++) {
         const xOff = HEX_R * S3 / 2 * r;
         const qMin2 = Math.floor((left - xOff - HEX_R * 2) / (HEX_R * S3));
@@ -188,51 +190,29 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             }
             let fill = 'rgba(248,250,252,0.08)', stroke = 'rgba(186,230,253,0.12)', sw = 0.6;
             const hasCell = cell && cell.type !== 'hq_part';
-            let isHq = cell?.type === 'hq';
-
-            if (hasCell) {
-                fill = cell.color || '#3b82f6'; stroke = 'rgba(255,255,255,0.6)'; sw = cell.isCenter ? 2 : 1;
-            }
-
+            const isHq = cell?.type === 'hq';
+            if (hasCell) { fill = cell.color || '#3b82f6'; stroke = 'rgba(255,255,255,0.6)'; sw = cell.isCenter ? 2 : 1; }
             ctx.beginPath();
             for (let i = 0; i < 6; i++) {
                 const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
                 i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
             }
             ctx.closePath();
-
             ctx.fillStyle = fill;
             ctx.globalAlpha = cell?.type === 'building' ? 0.65 : 1;
             ctx.fill();
             ctx.globalAlpha = 1;
-
             if (!hasCell && hexZones.length > 0) {
-                for (const z of hexZones) {
-                    ctx.fillStyle = hexAlpha(z.color, z.isActive ? 0.18 : 0.10);
-                    ctx.fill();
-                }
+                for (const z of hexZones) { ctx.fillStyle = hexAlpha(z.color, z.isActive ? 0.18 : 0.10); ctx.fill(); }
                 stroke = hexZones.some(z => z.isActive) ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.18)';
             }
-
             ctx.strokeStyle = stroke; ctx.lineWidth = sw;
             if (isHq) ctx.setLineDash([4, 4]);
             ctx.stroke();
             if (isHq) ctx.setLineDash([]);
-            if (hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r) {
-                ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill();
-            }
-            // Highlight ring for newly placed antiHQ blockers
-            if (highlightKeys && highlightKeys.has(key)) {
-                const hlAlpha = Math.max(0, 1 - highlightAge / 2000);
-                ctx.fillStyle = `rgba(251,191,36,${hlAlpha * 0.35})`;
-                ctx.fill();
-                ctx.strokeStyle = `rgba(251,191,36,${hlAlpha})`;
-                ctx.lineWidth = 2.5;
-                ctx.setLineDash([]);
-                ctx.stroke();
-            }
         }
     }
+    // Zone borders + labels
     for (const z of zones) {
         const cCol = toOffsetCol(z.cq, z.cr);
         let minX = Infinity, maxX = -Infinity;
@@ -241,8 +221,7 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             const qR = (cCol + ZONE_HALF) - Math.floor((row + 1) / 2);
             const [lx] = hex2px(qL, row);
             const [rx] = hex2px(qR, row);
-            minX = Math.min(minX, lx);
-            maxX = Math.max(maxX, rx);
+            minX = Math.min(minX, lx); maxX = Math.max(maxX, rx);
         }
         const leftX = minX, rightX = maxX;
         const [, topRowY] = hex2px(0, z.cr - ZONE_HALF);
@@ -257,6 +236,7 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
         const aName = alliances.find(a => a.id === z.aid)?.name || '';
         ctx.fillText(`${aName} Lv${z.lv}`, leftX + 8, topRowY - 4);
     }
+    // Coord labels
     if (showCoords) {
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         for (let r2 = rMin; r2 <= rMax; r2++) {
@@ -280,6 +260,7 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             }
         }
     }
+    // Building icons
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     for (const [key, cell] of Object.entries(cells)) {
         if (!cell) continue;
@@ -306,13 +287,56 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             ctx.font = '10px serif'; ctx.fillText('⛺', cx, cy);
         }
     }
+    // Text labels
+    const TEXT_SIZES = { S: 14, M: 24, L: 36 };
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+    for (const [, cell] of Object.entries(textLabels || {})) {
+        const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
+        ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
+        ctx.fillText(cell.label, cell.x, cell.y);
+    }
+    ctx.shadowBlur = 0;
+}
 
+// A01: Interaction layer - hover, ghost preview, highlight ring, hovered text highlight (every mousemove)
+function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+    const cells = hexCells;
+    const { left, right, top, bottom } = viewBounds;
+    const rMin = Math.floor((top - HEX_R * 2) / (HEX_R * 1.5));
+    const rMax = Math.ceil((bottom + HEX_R * 2) / (HEX_R * 1.5));
+    // Hover + highlight ring
+    for (let r = rMin; r <= rMax; r++) {
+        const xOff = HEX_R * S3 / 2 * r;
+        const qMin2 = Math.floor((left - xOff - HEX_R * 2) / (HEX_R * S3));
+        const qMax2 = Math.ceil((right - xOff + HEX_R * 2) / (HEX_R * S3));
+        for (let q = qMin2; q <= qMax2; q++) {
+            const [cx, cy] = hex2px(q, r);
+            const key = `${q},${r}`;
+            const needsHover = hoveredHex && hoveredHex[0] === q && hoveredHex[1] === r;
+            const needsHL = highlightKeys && highlightKeys.has(key);
+            if (!needsHover && !needsHL) continue;
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1];
+                i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy);
+            }
+            ctx.closePath();
+            if (needsHover) { ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fill(); }
+            if (needsHL) {
+                const hlAlpha = Math.max(0, 1 - highlightAge / 2000);
+                ctx.fillStyle = `rgba(251,191,36,${hlAlpha * 0.35})`; ctx.fill();
+                ctx.strokeStyle = `rgba(251,191,36,${hlAlpha})`; ctx.lineWidth = 2.5;
+                ctx.setLineDash([]); ctx.stroke();
+            }
+        }
+    }
+    // Ghost preview
     if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'text') {
         const [hq, hr] = hoveredHex;
         let ghostShape = [];
         if (tool === 'hq' || tool === 'center') ghostShape = CENTER_SHAPE;
         else if (tool === 'building' || tool === 'flex_building') ghostShape = [[0, 0]];
-
         if (ghostShape.length > 0) {
             let blocked = false;
             if (tool === 'center') {
@@ -329,12 +353,10 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             } else if (tool === 'flex_building') {
                 if (cells[`${hq},${hr}`]) blocked = true;
             }
-
             ctx.save();
             ctx.globalAlpha = 0.55;
             const ghostColor = blocked ? 'rgba(239, 68, 68, 0.8)' : (activeAlliance?.color || '#94a3b8');
             ctx.fillStyle = ghostColor;
-
             for (const [oq, or] of ghostShape) {
                 const tq = hq + oq, tr = hr + or;
                 const [cx, cy] = hex2px(tq, tr);
@@ -359,12 +381,10 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
                     ctx.globalAlpha = 0.55;
                 }
             }
-
             if (tool === 'center' && !blocked) {
                 const zBounds = getZoneBounds(hq, hr);
                 ctx.strokeStyle = activeAlliance ? hexAlpha(activeAlliance.color, 0.7) : 'rgba(255,255,255,0.5)';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([10, 5]);
+                ctx.lineWidth = 2; ctx.setLineDash([10, 5]);
                 ctx.strokeRect(zBounds.left, zBounds.top, zBounds.right - zBounds.left, zBounds.bottom - zBounds.top);
                 ctx.setLineDash([]);
                 ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
@@ -376,30 +396,28 @@ function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeI
             ctx.restore();
         }
     }
-
-    const TEXT_SIZES = { S: 14, M: 24, L: 36 };
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
-    for (const [key, cell] of Object.entries(textLabels || {})) {
-        const isHovered = key === hoveredTextId;
-
+    // Hovered text label highlight
+    if (hoveredTextId && textLabels?.[hoveredTextId]) {
+        const cell = textLabels[hoveredTextId];
+        const TEXT_SIZES = { S: 14, M: 24, L: 36 };
         ctx.save();
-        if (isHovered) {
-            ctx.shadowColor = 'rgba(245, 158, 11, 0.8)';
-            ctx.shadowBlur = 8;
-            ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
-            const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
-            const textWidth = ctx.measureText(cell.label).width;
-            ctx.fillRect(cell.x - textWidth / 2 - 5, cell.y - sz / 2, textWidth + 10, sz);
-        }
-
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.8)'; ctx.shadowBlur = 8;
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
         const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
-        ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
-        ctx.fillText(cell.label, cell.x, cell.y);
+        ctx.font = `bold ${sz}px sans-serif`;
+        const textWidth = ctx.measureText(cell.label).width;
+        ctx.fillRect(cell.x - textWidth / 2 - 5, cell.y - sz / 2, textWidth + 10, sz);
         ctx.restore();
     }
-    ctx.shadowBlur = 0;
 }
+
+// A01: Compatibility wrapper used by exportImage (single-canvas path)
+function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+    const cells = hexCells; // A05: alias for internal use
+    drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activeId, viewBounds, showCoords);
+    drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool, toolLevel, activeAlliance, hoveredTextId, highlightKeys, highlightAge);
+}
+
 
 export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [alliances, setAlliances] = useState([]);
@@ -428,7 +446,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [hoverCoordText, setHoverCoordText] = useState('');
     const [showHelp, setShowHelp] = useState(false);
 
-    const canvasRef = useRef(null); const containerRef = useRef(null);
+    const canvasRef = useRef(null); const bgCanvasRef = useRef(null); const containerRef = useRef(null);
+    const bgDirtyRef = useRef(true); // A01: true = background needs redraw
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
     const showCoordsRef = useRef(false);
     const hexCellsRef = useRef({}); const textLabelsRef = useRef({}); const originRef = useRef(null);
@@ -455,16 +474,16 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
     const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-    useEffect(() => { hexCellsRef.current = hexCells; pushHistory(hexCells); setBuildingCounts(recomputeCounts(hexCells)); requestDraw(); }, [hexCells]);
-    useEffect(() => { textLabelsRef.current = textLabels; requestDraw(); }, [textLabels]);
-    useEffect(() => { originRef.current = originPoint; requestDraw(); }, [originPoint]);
-    useEffect(() => { alliancesRef.current = alliances; requestDraw(); }, [alliances]);
+    useEffect(() => { hexCellsRef.current = hexCells; pushHistory(hexCells); setBuildingCounts(recomputeCounts(hexCells)); bgDirtyRef.current = true; requestDraw(); }, [hexCells]);
+    useEffect(() => { textLabelsRef.current = textLabels; bgDirtyRef.current = true; requestDraw(); }, [textLabels]);
+    useEffect(() => { originRef.current = originPoint; bgDirtyRef.current = true; requestDraw(); }, [originPoint]);
+    useEffect(() => { alliancesRef.current = alliances; bgDirtyRef.current = true; requestDraw(); }, [alliances]);
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { toolLevelRef.current = toolLevel; }, [toolLevel]);
-    useEffect(() => { activeIdRef.current = activeAllianceId; requestDraw(); }, [activeAllianceId]);
+    useEffect(() => { activeIdRef.current = activeAllianceId; bgDirtyRef.current = true; requestDraw(); }, [activeAllianceId]);
     useEffect(() => { textColorRef.current = textColor; }, [textColor]);
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
-    useEffect(() => { showCoordsRef.current = showCoords; requestDraw(); }, [showCoords]);
+    useEffect(() => { showCoordsRef.current = showCoords; bgDirtyRef.current = true; requestDraw(); }, [showCoords]);
 
     // F03: 一次掃描產生計數 map，供 countBuildings 使用
     const recomputeCounts = (cellsObj) => {
@@ -897,7 +916,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast('📸 已匯出完整地圖！');
     };
 
-    const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
+    const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; bgDirtyRef.current = true; requestDraw(); };
     useEffect(() => {
         const cont = containerRef.current;
         if (!cont) return;
@@ -910,10 +929,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             if (!canvas) return;
             const dpr = window.devicePixelRatio || 1;
             dprRef.current = dpr;
-            canvas.width = width * dpr;
-            canvas.height = height * dpr;
-            canvas.style.width = `${width}px`;
-            canvas.style.height = `${height}px`;
+            canvas.width = width * dpr; canvas.height = height * dpr;
+            canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+            const bgCanvas = bgCanvasRef.current;
+            if (bgCanvas) { bgCanvas.width = width * dpr; bgCanvas.height = height * dpr; bgCanvas.style.width = `${width}px`; bgCanvas.style.height = `${height}px`; }
+            bgDirtyRef.current = true;
             if (offsetRef.current.x === 0 && offsetRef.current.y === 0) {
                 offsetRef.current = { x: width / 2, y: height / 2 };
             }
@@ -924,7 +944,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     }, []);
     useEffect(() => {
         const cont = containerRef.current; if (!cont) return;
-        const onWheel = (e) => { e.preventDefault(); zoomRef.current = Math.min(3, Math.max(0.1, zoomRef.current + (e.deltaY > 0 ? -0.05 : 0.05))); setZoom(zoomRef.current); requestDraw(); };
+        const onWheel = (e) => { e.preventDefault(); zoomRef.current = Math.min(3, Math.max(0.1, zoomRef.current + (e.deltaY > 0 ? -0.05 : 0.05))); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); };
         cont.addEventListener('wheel', onWheel, { passive: false });
         return () => cont.removeEventListener('wheel', onWheel);
     }, []);
@@ -938,15 +958,14 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     }, []);
 
     const requestDraw = useCallback(() => { if (rafId.current) cancelAnimationFrame(rafId.current); rafId.current = requestAnimationFrame(draw); }, []);
+    // A01: mark bg dirty and redraw both layers (used for pan/zoom/data changes)
+    const requestFullDraw = useCallback(() => { bgDirtyRef.current = true; if (rafId.current) cancelAnimationFrame(rafId.current); rafId.current = requestAnimationFrame(draw); }, []);
     const draw = () => {
         const canvas = canvasRef.current; if (!canvas) return;
+        const bgCanvas = bgCanvasRef.current;
         const ctx = canvas.getContext('2d'); const dpr = dprRef.current;
         const cont = containerRef.current; if (!cont) return;
         const rect = cont.getBoundingClientRect();
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.save(); ctx.scale(dpr, dpr);
-        ctx.translate(offsetRef.current.x, offsetRef.current.y);
-        ctx.scale(zoomRef.current, zoomRef.current);
         const z = zoomRef.current;
         const viewBounds = {
             left: -offsetRef.current.x / z, right: (rect.width - offsetRef.current.x) / z,
@@ -956,10 +975,29 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         const hl = highlightRef.current;
         const hlAge = hl ? (Date.now() - hl.startTime) : 0;
         if (hl && hlAge >= 2000) highlightRef.current = null;
-        drawGloryMap(ctx, hexCellsRef.current, textLabelsRef.current, originRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+
+        // A01: Background layer - only redraw when dirty
+        if (bgCanvas && bgDirtyRef.current) {
+            bgDirtyRef.current = false;
+            const bgCtx = bgCanvas.getContext('2d');
+            bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+            bgCtx.save(); bgCtx.scale(dpr, dpr);
+            bgCtx.translate(offsetRef.current.x, offsetRef.current.y);
+            bgCtx.scale(z, z);
+            drawBackground(bgCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, alliancesRef.current, activeIdRef.current, viewBounds, showCoordsRef.current);
+            bgCtx.restore();
+        }
+
+        // A01: Interaction layer - always redraw (hover/ghost/highlight)
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.save(); ctx.scale(dpr, dpr);
+        ctx.translate(offsetRef.current.x, offsetRef.current.y);
+        ctx.scale(z, z);
+        drawInteraction(ctx, hexCellsRef.current, textLabelsRef.current, alliancesRef.current, hoveredHex.current, viewBounds, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+        ctx.restore();
+
         // Keep animating while highlight is active
         if (hl && hlAge < 2000) requestAnimationFrame(draw);
-        ctx.restore();
     };
 
     const getWorldPos = (e) => {
@@ -1009,7 +1047,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             const dx = e.clientX - lastPos.current.x, dy = e.clientY - lastPos.current.y;
             lastPos.current = { x: e.clientX, y: e.clientY };
             offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
-            requestDraw(); return;
+            bgDirtyRef.current = true; requestDraw(); return;
         }
         if (isPainting.current) {
             const [q, r] = px2hex(wx, wy);
@@ -1231,10 +1269,10 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 </div>
                 <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1.5 bg-slate-800/60 px-2 py-1 rounded-xl border border-slate-700/50">
-                        <button onClick={() => { zoomRef.current = Math.max(0.1, zoomRef.current - 0.1); setZoom(zoomRef.current); requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomOut size={13} /></button>
-                        <input type="range" min="0.1" max="2.5" step="0.05" value={zoom} onChange={e => { zoomRef.current = parseFloat(e.target.value); setZoom(zoomRef.current); requestDraw(); }}
+                        <button onClick={() => { zoomRef.current = Math.max(0.1, zoomRef.current - 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomOut size={13} /></button>
+                        <input type="range" min="0.1" max="2.5" step="0.05" value={zoom} onChange={e => { zoomRef.current = parseFloat(e.target.value); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }}
                             className="w-14 h-1 bg-slate-700 rounded cursor-pointer accent-amber-500" />
-                        <button onClick={() => { zoomRef.current = Math.min(2.5, zoomRef.current + 0.1); setZoom(zoomRef.current); requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomIn size={13} /></button>
+                        <button onClick={() => { zoomRef.current = Math.min(2.5, zoomRef.current + 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomIn size={13} /></button>
                         <span className="text-[9px] font-mono text-amber-400 w-7 text-center">{Math.round(zoom * 100)}%</span>
                     </div>
                     <button onClick={centerMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white border border-slate-700"><Maximize size={13} /></button>
@@ -1360,6 +1398,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 )}
 
                 <div ref={containerRef} className="flex-1 relative overflow-hidden">
+                    <canvas ref={bgCanvasRef} className="absolute inset-0 pointer-events-none" />
                     <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
                         onClick={handleClick} onDoubleClick={handleDoubleClick}
