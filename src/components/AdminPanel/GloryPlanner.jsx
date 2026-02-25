@@ -427,6 +427,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [textLabels, setTextLabels] = useState({});
     const [originPoint, setOriginPoint] = useState(null);
     const [buildingCounts, setBuildingCounts] = useState({}); // F03: { "${aid}_${lv}": number }
+    const buildingCountsRef = useRef({}); // Bug fix: touch handlers need ref to avoid stale closure
     const [tool, setTool] = useState('hand');
     const [toolLevel, setToolLevel] = useState(1);
     const [zoom, setZoom] = useState(0.5);
@@ -445,6 +446,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [exportTextData, setExportTextData] = useState('');
     const [hoverCoordText, setHoverCoordText] = useState('');
     const [showHelp, setShowHelp] = useState(false);
+    const [hqLoadingId, setHqLoadingId] = useState(null);
+    const [panelCollapsed, setPanelCollapsed] = useState(false); // A03: mobile panel toggle // A02: 'aid_lv' while Worker is running
 
     const canvasRef = useRef(null); const bgCanvasRef = useRef(null); const containerRef = useRef(null);
     const bgDirtyRef = useRef(true); // A01: true = background needs redraw
@@ -461,6 +464,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
     const highlightRef = useRef(null); // { keys: Set<string>, startTime: number } | null
+    const touchStartPos = useRef(null);   // A03: { x, y } for single-finger tap detection
+    const pinchStartDist = useRef(null);  // A03: initial distance for pinch-to-zoom
+    const pinchStartZoom = useRef(null);  // A03: zoom at pinch start
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
     const pushHistory = (nc) => {
@@ -474,7 +480,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
     const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-    useEffect(() => { hexCellsRef.current = hexCells; pushHistory(hexCells); setBuildingCounts(recomputeCounts(hexCells)); bgDirtyRef.current = true; requestDraw(); }, [hexCells]);
+    useEffect(() => { hexCellsRef.current = hexCells; pushHistory(hexCells); const counts = recomputeCounts(hexCells); buildingCountsRef.current = counts; setBuildingCounts(counts); bgDirtyRef.current = true; requestDraw(); }, [hexCells]);
     useEffect(() => { textLabelsRef.current = textLabels; bgDirtyRef.current = true; requestDraw(); }, [textLabels]);
     useEffect(() => { originRef.current = originPoint; bgDirtyRef.current = true; requestDraw(); }, [originPoint]);
     useEffect(() => { alliancesRef.current = alliances; bgDirtyRef.current = true; requestDraw(); }, [alliances]);
@@ -497,7 +503,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         return counts;
     };
     const getQuota = (alliance, lv) => alliance.centers[lv] ? alliance.memberCount * LEVEL_MULTI[lv] : 0;
-    const countBuildings = (aid, lv) => buildingCounts[`${aid}_${lv}`] ?? 0; // F03: O(1) 讀取 / A05: reads from hexCells-derived state
+    const countBuildings = (aid, lv) => buildingCountsRef.current[`${aid}_${lv}`] ?? 0; // Bug fix: read ref for fresh value in all contexts
 
     const addAlliance = () => {
         const name = prompt('聯盟名稱（例如 [KTX]）：');
@@ -564,69 +570,155 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast(`⛺ 已填充 ${quota - used - remaining} 棟`);
     };
 
-    // ── 防總部封鎖：用最少建築讓區域內無法放置任何7格總部 ──
+    // ── 防總部封鎖：A02 Web Worker 非同步版本，UI 不凍結 ──
     const antiHQFill = (aid, lv) => {
         const alliance = alliancesRef.current.find(a => a.id === aid);
         if (!alliance?.centers[lv]) return;
+        if (hqLoadingId) return; // 已在計算中，防止重複點擊
         const { q: cq, r: cr } = alliance.centers[lv];
+        const loadingId = `${aid}_${lv}`;
+        setHqLoadingId(loadingId);
 
-        const blockerKeys = computeHQBlockingSet(cq, cr, hexCellsRef.current);
+        // A02: Worker 程式碼內嵌為 Blob URL，不需要獨立檔案
+        const workerCode = `
+const HQ_SHAPE = [[0,0],[1,-1],[1,0],[0,1],[-1,1],[-1,0],[0,-1]];
+const ZONE_HALF = 13;
+const toOffsetCol = (q, r) => q + Math.floor((r + 1) / 2);
+const isInZone = (q, r, cq, cr) => {
+    if (Math.abs(r - cr) > ZONE_HALF) return false;
+    const col = toOffsetCol(q, r);
+    const cCol = toOffsetCol(cq, cr);
+    return Math.abs(col - cCol) <= ZONE_HALF;
+};
+const getZoneHexes = (cq, cr) => {
+    const cCol = toOffsetCol(cq, cr);
+    const hexes = [];
+    for (let r = cr - ZONE_HALF; r <= cr + ZONE_HALF; r++) {
+        for (let col = cCol - ZONE_HALF; col <= cCol + ZONE_HALF; col++) {
+            hexes.push([col - Math.floor((r + 1) / 2), r]);
+        }
+    }
+    return hexes;
+};
+const computeHQBlockingSet = (cq, cr, existingCells) => {
+    const zoneHexes = getZoneHexes(cq, cr);
+    const zoneSet = new Set(zoneHexes.map(([q, r]) => q + ',' + r));
+    const occupied = new Set(Object.keys(existingCells).filter(k => existingCells[k]));
+    const hqPlacements = [];
+    for (const [hq, hr] of zoneHexes) {
+        const footprint = HQ_SHAPE.map(([oq, or]) => (hq+oq) + ',' + (hr+or));
+        if (!footprint.every(k => zoneSet.has(k))) continue;
+        if (footprint.some(k => occupied.has(k))) continue;
+        hqPlacements.push(footprint);
+    }
+    if (hqPlacements.length === 0) return [];
+    const hexToIdx = new Map();
+    hqPlacements.forEach((fp, idx) => { for (const k of fp) { if (!hexToIdx.has(k)) hexToIdx.set(k, []); hexToIdx.get(k).push(idx); } });
+    const coverCnt = new Array(hqPlacements.length).fill(0);
+    const firstCovered = new Array(hqPlacements.length).fill(false);
+    const score = new Map();
+    for (const [k, idxs] of hexToIdx) { if (!occupied.has(k) && zoneSet.has(k)) score.set(k, idxs.length); }
+    const chosen = new Set();
+    let totalUnblocked = hqPlacements.length;
+    while (totalUnblocked > 0) {
+        let bestKey = null, bestScore = 0;
+        for (const [k, s] of score) { if (s > bestScore) { bestScore = s; bestKey = k; } }
+        if (!bestKey || bestScore === 0) break;
+        chosen.add(bestKey); score.delete(bestKey);
+        for (const idx of (hexToIdx.get(bestKey) || [])) {
+            coverCnt[idx]++;
+            if (!firstCovered[idx]) {
+                firstCovered[idx] = true; totalUnblocked--;
+                for (const k2 of hqPlacements[idx]) { if (score.has(k2)) { const ns = score.get(k2) - 1; if (ns <= 0) score.delete(k2); else score.set(k2, ns); } }
+            }
+        }
+    }
+    let improved = true;
+    while (improved) {
+        improved = false;
+        for (const key of [...chosen]) {
+            const idxs = hexToIdx.get(key) || [];
+            if (idxs.every(idx => coverCnt[idx] >= 2)) { chosen.delete(key); for (const idx of idxs) coverCnt[idx]--; improved = true; }
+        }
+    }
+    return [...chosen];
+};
+self.onmessage = ({ data: { cq, cr, hexCells } }) => {
+    const result = computeHQBlockingSet(cq, cr, hexCells);
+    self.postMessage({ blockerKeys: result });
+};
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+        const worker = new Worker(workerUrl);
 
-        // ── 由近到遠排序：配額不足時優先保護聯盟中心附近 ──
-        const hexDist = (q, r) => {
-            const dq = q - cq, dr = r - cr;
-            return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+        worker.onmessage = ({ data: { blockerKeys } }) => {
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            setHqLoadingId(null);
+
+            // ── 由近到遠排序 ──
+            const hexDist = (q, r) => { const dq = q - cq, dr = r - cr; return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2; };
+            blockerKeys.sort((a, b) => {
+                const [aq, ar] = a.split(',').map(Number);
+                const [bq, br] = b.split(',').map(Number);
+                return hexDist(aq, ar) - hexDist(bq, br);
+            });
+
+            if (blockerKeys.length === 0) { showToast('✅ 區域已完全封鎖，無需額外建築'); return; }
+
+            const currentAlliance = alliancesRef.current.find(a => a.id === aid);
+            if (!currentAlliance) return;
+            const quota = getQuota(currentAlliance, lv);
+            const used = countBuildings(aid, lv);
+            const available = quota - used;
+
+            if (blockerKeys.length > available) {
+                const ok = window.confirm(
+                    `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，\n` +
+                    `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。\n\n` +
+                    `要用盡剩餘配額盡量封鎖嗎？（會從聯盟中心往外優先放置）`
+                );
+                if (!ok) return;
+            }
+
+            const newlyPlaced = new Set();
+            setHexCells(prev => {
+                const nc = { ...prev };
+                let placed = 0;
+                const limit = Math.min(blockerKeys.length, available);
+                for (const k of blockerKeys) {
+                    if (placed >= limit) break;
+                    if (nc[k]) continue;
+                    const [q, r] = k.split(',').map(Number);
+                    if (!isInZone(q, r, cq, cr)) continue;
+                    nc[k] = { type: 'building', allianceId: aid, level: lv, color: currentAlliance.color };
+                    newlyPlaced.add(k);
+                    placed++;
+                }
+                if (placed < blockerKeys.length) {
+                    showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
+                } else {
+                    showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
+                }
+                if (newlyPlaced.size > 0) {
+                    highlightRef.current = { keys: newlyPlaced, startTime: Date.now() };
+                    requestDraw();
+                }
+                return nc;
+            });
         };
-        blockerKeys.sort((a, b) => {
-            const [aq, ar] = a.split(',').map(Number);
-            const [bq, br] = b.split(',').map(Number);
-            return hexDist(aq, ar) - hexDist(bq, br);
-        });
 
-        if (blockerKeys.length === 0) {
-            showToast('✅ 區域已完全封鎖，無需額外建築');
-            return;
-        }
+        worker.onerror = (err) => {
+            worker.terminate();
+            URL.revokeObjectURL(workerUrl);
+            setHqLoadingId(null);
+            showToast('❌ 防總計算失敗');
+            console.error('hqWorker error:', err);
+        };
 
-        const quota = getQuota(alliance, lv);
-        const used = countBuildings(aid, lv);
-        const available = quota - used;
-
-        if (blockerKeys.length > available) {
-            const ok = window.confirm(
-                `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，\n` +
-                `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。\n\n` +
-                `要用盡剩餘配額盡量封鎖嗎？（會從聯盟中心往外優先放置）`
-            );
-            if (!ok) return;
-        }
-
-        const newlyPlaced = new Set();
-        setHexCells(prev => {
-            const nc = { ...prev };
-            let placed = 0;
-            const limit = Math.min(blockerKeys.length, available);
-            for (const k of blockerKeys) {
-                if (placed >= limit) break;
-                if (nc[k]) continue;
-                const [q, r] = k.split(',').map(Number);
-                if (!isInZone(q, r, cq, cr)) continue;
-                nc[k] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
-                newlyPlaced.add(k);
-                placed++;
-            }
-            if (placed < blockerKeys.length) {
-                showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
-            } else {
-                showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
-            }
-            // Kick off highlight animation for newly placed blockers
-            if (newlyPlaced.size > 0) {
-                highlightRef.current = { keys: newlyPlaced, startTime: Date.now() };
-                requestDraw();
-            }
-            return nc;
-        });
+        // Send data to worker (hexCells is serialisable plain object)
+        worker.postMessage({ cq, cr, hexCells: hexCellsRef.current });
     };
 
     const saveLocal = () => {
@@ -957,6 +1049,22 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
     }, []);
 
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        // A03: must use addEventListener with passive:false to allow preventDefault
+        canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+        canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+        canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+        canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+        return () => {
+            canvas.removeEventListener('touchstart', handleTouchStart);
+            canvas.removeEventListener('touchmove', handleTouchMove);
+            canvas.removeEventListener('touchend', handleTouchEnd);
+            canvas.removeEventListener('touchcancel', handleTouchEnd);
+        };
+    }, []);
+
     const requestDraw = useCallback(() => { if (rafId.current) cancelAnimationFrame(rafId.current); rafId.current = requestAnimationFrame(draw); }, []);
     // A01: mark bg dirty and redraw both layers (used for pan/zoom/data changes)
     const requestFullDraw = useCallback(() => { bgDirtyRef.current = true; if (rafId.current) cancelAnimationFrame(rafId.current); rafId.current = requestAnimationFrame(draw); }, []);
@@ -1003,6 +1111,87 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const getWorldPos = (e) => {
         const rect = canvasRef.current.getBoundingClientRect();
         return [(e.clientX - rect.left - offsetRef.current.x) / zoomRef.current, (e.clientY - rect.top - offsetRef.current.y) / zoomRef.current];
+    };
+
+
+    // A03: Coordinate helper that takes raw clientX/Y (used by touch handlers)
+    const getWorldPosFromClient = (clientX, clientY) => {
+        const rect = canvasRef.current.getBoundingClientRect();
+        return [(clientX - rect.left - offsetRef.current.x) / zoomRef.current,
+        (clientY - rect.top - offsetRef.current.y) / zoomRef.current];
+    };
+
+    // A03: Touch handlers — completely independent from mouse handlers
+    const handleTouchStart = (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1) {
+            const t = e.touches[0];
+            touchStartPos.current = { x: t.clientX, y: t.clientY };
+            pinchStartDist.current = null;
+            if (toolRef.current === 'hand') {
+                isDragging.current = true; setIsPanning(true);
+                lastPos.current = { x: t.clientX, y: t.clientY };
+            } else if (toolRef.current === 'building' || toolRef.current === 'eraser') {
+                isPainting.current = true; lastPaintHex.current = null;
+                const [wx, wy] = getWorldPosFromClient(t.clientX, t.clientY);
+                const [q, r] = px2hex(wx, wy);
+                applyTool(q, r, wx, wy);
+            }
+        } else if (e.touches.length === 2) {
+            // Pinch start: record initial distance and zoom
+            isDragging.current = false; setIsPanning(false);
+            isPainting.current = false; lastPaintHex.current = null;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            pinchStartDist.current = Math.hypot(dx, dy);
+            pinchStartZoom.current = zoomRef.current;
+        }
+    };
+
+    const handleTouchMove = (e) => {
+        e.preventDefault();
+        if (e.touches.length === 1 && pinchStartDist.current === null) {
+            const t = e.touches[0];
+            if (isDragging.current) {
+                const dx = t.clientX - lastPos.current.x;
+                const dy = t.clientY - lastPos.current.y;
+                lastPos.current = { x: t.clientX, y: t.clientY };
+                offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
+                bgDirtyRef.current = true; requestDraw();
+            } else if (isPainting.current) {
+                const [wx, wy] = getWorldPosFromClient(t.clientX, t.clientY);
+                const [q, r] = px2hex(wx, wy);
+                const k = `${q},${r}`;
+                if (lastPaintHex.current !== k) { lastPaintHex.current = k; applyTool(q, r, wx, wy); }
+            }
+        } else if (e.touches.length === 2 && pinchStartDist.current !== null) {
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            const scale = dist / pinchStartDist.current;
+            zoomRef.current = Math.min(3, Math.max(0.1, pinchStartZoom.current * scale));
+            setZoom(zoomRef.current);
+            bgDirtyRef.current = true; requestDraw();
+        }
+    };
+
+    const handleTouchEnd = (e) => {
+        e.preventDefault();
+        const wasPainting = isPainting.current;
+        // Single tap: if finger barely moved, treat as click
+        if (e.changedTouches.length === 1 && touchStartPos.current && toolRef.current !== 'hand') {
+            const t = e.changedTouches[0];
+            const moved = Math.hypot(t.clientX - touchStartPos.current.x, t.clientY - touchStartPos.current.y);
+            if (moved < 8 && !wasPainting) {
+                const [wx, wy] = getWorldPosFromClient(t.clientX, t.clientY);
+                const [q, r] = px2hex(wx, wy);
+                applyTool(q, r, wx, wy);
+            }
+        }
+        isDragging.current = false; setIsPanning(false);
+        isPainting.current = false; lastPaintHex.current = null;
+        pinchStartDist.current = null; touchStartPos.current = null;
+        if (wasPainting) pushHistory(hexCellsRef.current);
     };
 
     const getHoverCoordLabel = useCallback((q, r) => {
@@ -1176,7 +1365,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     if (!isInZone(q, r, center.q, center.r)) return prev;
                     if (nc[key]) return prev;
                     const quota = getQuota(alliance, lv);
-                    const used = countBuildings(aid, lv);
+                    // Bug fix: count from nc (latest prev) not stale ref, handles rapid touch painting
+                    const used = Object.values(nc).filter(v => v?.type === 'building' && v.allianceId === aid && v.level === lv).length;
                     if (used >= quota) { showToast('❌ 配額已滿'); return prev; }
                     nc[key] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
                 } else {
@@ -1303,8 +1493,16 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 </div>
             </div>
 
-            <div className="flex flex-1 overflow-hidden">
-                <div className="w-56 bg-slate-950/50 border-r border-slate-800 overflow-y-auto p-3 space-y-2 flex-shrink-0">
+            <div className="flex flex-1 overflow-hidden relative">
+                {/* A03: Toggle button — lives OUTSIDE panel, always visible */}
+                <button onClick={() => setPanelCollapsed(v => !v)}
+                    className="absolute top-2 z-30 w-6 h-10 bg-slate-800 border border-slate-700 rounded-r-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-700 text-xs shadow-lg transition-all duration-200"
+                    style={{ left: panelCollapsed ? 0 : '14rem' }}
+                    title={panelCollapsed ? '展開面板' : '收折面板'}>
+                    {panelCollapsed ? '›' : '‹'}
+                </button>
+                {/* A03: Collapsible alliance panel */}
+                <div className={`bg-slate-950/50 border-r border-slate-800 flex-shrink-0 transition-all duration-200 ${panelCollapsed ? 'w-0 overflow-hidden p-0' : 'w-56 overflow-y-auto p-3 space-y-2'}`}>
                     <button onClick={addAlliance} className="w-full py-2 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg text-xs font-bold flex items-center justify-center gap-1 border border-amber-600/30">
                         <Plus size={14} /> 新增聯盟
                     </button>
@@ -1358,8 +1556,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                                     </button>
                                                     <button onClick={(e) => { e.stopPropagation(); antiHQFill(a.id, lv); }}
                                                         title="自動放置最少建築，封鎖區域內所有可能的總部位置（由中心往外放）"
-                                                        className="px-1.5 py-0.5 bg-rose-600/20 text-rose-400 rounded text-[9px] hover:bg-rose-600/30">
-                                                        🛡️防總
+                                                        disabled={!!hqLoadingId}
+                                                        className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${hqLoadingId === `${a.id}_${lv}` ? 'bg-rose-600/40 text-rose-300 cursor-wait animate-pulse' : 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30'} ${hqLoadingId && hqLoadingId !== `${a.id}_${lv}` ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                                                        {hqLoadingId === `${a.id}_${lv}` ? '⏳計算中' : '🛡️防總'}
                                                     </button>
                                                 </div>
                                             )}
