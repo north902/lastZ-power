@@ -59,9 +59,7 @@ const computeHQBlockingSet = (cq, cr, existingCells) => {
     const zoneSet = new Set(zoneHexes.map(([q, r]) => `${q},${r}`));
 
     const occupied = new Set(
-        Object.keys(existingCells).filter(k =>
-            existingCells[k] && !k.startsWith('text_') && k !== 'origin'
-        )
+        Object.keys(existingCells).filter(k => existingCells[k])
     );
 
     // Only HQ positions where all 7 footprint hexes are inside the zone
@@ -163,7 +161,8 @@ const getZoneBounds = (cq, cr) => {
     };
 };
 
-function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+    const cells = hexCells; // A05: alias for internal use
     const { left, right, top, bottom } = viewBounds;
     const zones = [];
     for (const a of alliances) {
@@ -269,8 +268,8 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
                 if (!cells[k2]) {
                     const [cx2, cy2] = hex2px(q2, r2);
                     let text = `${q2},${r2}`;
-                    if (cells.origin) {
-                        const q0 = cells.origin.q, r0 = cells.origin.r, x0 = cells.origin.x, y0 = cells.origin.y;
+                    if (originPoint) {
+                        const q0 = originPoint.q, r0 = originPoint.r, x0 = originPoint.x, y0 = originPoint.y;
                         const gy = r2 - r0 + y0;
                         const gx = q2 - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
                         text = `${gx},${gy}`;
@@ -381,9 +380,7 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
     const TEXT_SIZES = { S: 14, M: 24, L: 36 };
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
-    for (const key of Object.keys(cells)) {
-        if (!key.startsWith('text_')) continue;
-        const cell = cells[key];
+    for (const [key, cell] of Object.entries(textLabels || {})) {
         const isHovered = key === hoveredTextId;
 
         ctx.save();
@@ -407,7 +404,10 @@ function drawGloryMap(ctx, cells, alliances, activeId, hoveredHex, viewBounds, s
 export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [alliances, setAlliances] = useState([]);
     const [activeAllianceId, setActiveAllianceId] = useState(null);
-    const [cells, setCells] = useState({});
+    // A05: split cells into three independent states
+    const [hexCells, setHexCells] = useState({});
+    const [textLabels, setTextLabels] = useState({});
+    const [originPoint, setOriginPoint] = useState(null);
     const [buildingCounts, setBuildingCounts] = useState({}); // F03: { "${aid}_${lv}": number }
     const [tool, setTool] = useState('hand');
     const [toolLevel, setToolLevel] = useState(1);
@@ -431,7 +431,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const canvasRef = useRef(null); const containerRef = useRef(null);
     const offsetRef = useRef({ x: 0, y: 0 }); const zoomRef = useRef(0.5);
     const showCoordsRef = useRef(false);
-    const cellsRef = useRef({}); const alliancesRef = useRef([]);
+    const hexCellsRef = useRef({}); const textLabelsRef = useRef({}); const originRef = useRef(null);
+    const alliancesRef = useRef([]);
     const toolRef = useRef('hand'); const toolLevelRef = useRef(1);
     const activeIdRef = useRef(null);
     const isDragging = useRef(false); const isPainting = useRef(false);
@@ -451,10 +452,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         if (h.length > MAX_HISTORY) h.shift();
         historyRef.current = h; historyIdx.current = h.length - 1;
     };
-    const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
-    const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
+    const undo = () => { if (historyIdx.current <= 0) return; historyIdx.current--; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↩️ 復原'); };
+    const redo = () => { if (historyIdx.current >= historyRef.current.length - 1) return; historyIdx.current++; skipHistory.current = true; setHexCells({ ...historyRef.current[historyIdx.current] }); showToast('↪️ 重做'); };
 
-    useEffect(() => { cellsRef.current = cells; pushHistory(cells); setBuildingCounts(recomputeCounts(cells)); requestDraw(); }, [cells]);
+    useEffect(() => { hexCellsRef.current = hexCells; pushHistory(hexCells); setBuildingCounts(recomputeCounts(hexCells)); requestDraw(); }, [hexCells]);
+    useEffect(() => { textLabelsRef.current = textLabels; requestDraw(); }, [textLabels]);
+    useEffect(() => { originRef.current = originPoint; requestDraw(); }, [originPoint]);
     useEffect(() => { alliancesRef.current = alliances; requestDraw(); }, [alliances]);
     useEffect(() => { toolRef.current = tool; }, [tool]);
     useEffect(() => { toolLevelRef.current = toolLevel; }, [toolLevel]);
@@ -475,7 +478,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         return counts;
     };
     const getQuota = (alliance, lv) => alliance.centers[lv] ? alliance.memberCount * LEVEL_MULTI[lv] : 0;
-    const countBuildings = (aid, lv) => buildingCounts[`${aid}_${lv}`] ?? 0; // F03: O(1) 讀取
+    const countBuildings = (aid, lv) => buildingCounts[`${aid}_${lv}`] ?? 0; // F03: O(1) 讀取 / A05: reads from hexCells-derived state
 
     const addAlliance = () => {
         const name = prompt('聯盟名稱（例如 [KTX]）：');
@@ -490,7 +493,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const removeAlliance = (id) => {
         if (!window.confirm('確定刪除此聯盟和所有建築？')) return;
         setAlliances(prev => prev.filter(a => a.id !== id));
-        setCells(prev => {
+        setHexCells(prev => {
             const nc = { ...prev };
             Object.keys(nc).forEach(k => { if (nc[k]?.allianceId === id) delete nc[k]; });
             return nc;
@@ -506,7 +509,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
     const updateAllianceColor = (id, newColor) => {
         setAlliances(prev => prev.map(a => a.id === id ? { ...a, color: newColor } : a));
-        setCells(prev => {
+        setHexCells(prev => {
             const nc = { ...prev };
             let changed = false;
             Object.keys(nc).forEach(k => {
@@ -528,7 +531,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         let remaining = quota - used;
         if (remaining <= 0) { showToast('❌ 配額已滿'); return; }
         const zoneHexes = getZoneHexes(cq, cr);
-        setCells(prev => {
+        setHexCells(prev => {
             const nc = { ...prev };
             for (const [hq, hr] of zoneHexes) {
                 if (remaining <= 0) break;
@@ -548,7 +551,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         if (!alliance?.centers[lv]) return;
         const { q: cq, r: cr } = alliance.centers[lv];
 
-        const blockerKeys = computeHQBlockingSet(cq, cr, cellsRef.current);
+        const blockerKeys = computeHQBlockingSet(cq, cr, hexCellsRef.current);
 
         // ── 由近到遠排序：配額不足時優先保護聯盟中心附近 ──
         const hexDist = (q, r) => {
@@ -580,7 +583,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
 
         const newlyPlaced = new Set();
-        setCells(prev => {
+        setHexCells(prev => {
             const nc = { ...prev };
             let placed = 0;
             const limit = Math.min(blockerKeys.length, available);
@@ -608,31 +611,44 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
 
     const saveLocal = () => {
-        localStorage.setItem('glory_planner', JSON.stringify({ version: 2, cells: cellsRef.current, alliances: alliancesRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
+        localStorage.setItem('glory_planner', JSON.stringify({ version: 3, hexCells: hexCellsRef.current, textLabels: textLabelsRef.current, originPoint: originRef.current, alliances: alliancesRef.current, zoom: zoomRef.current, offset: offsetRef.current }));
         showToast('💾 已儲存！');
     };
-    // F06-2: migrate舊格式到新格式，目前 v1→v2 只需補上 version 欄位
-    const migrate_v1_to_v2 = (d) => ({ version: 2, cells: d.cells || {}, alliances: d.alliances || [], zoom: d.zoom, offset: d.offset });
+    // A05: migrate old flat cells format (v1/v2) to split format (v3)
+    const migrateToV3 = (d) => {
+        const oldCells = d.cells || d.hexCells || {};
+        const hexCells = {}, textLabels = {};
+        let originPoint = d.originPoint || null;
+        for (const [k, v] of Object.entries(oldCells)) {
+            if (k === 'origin') { originPoint = v; continue; }
+            if (k.startsWith('text_')) { textLabels[k] = v; continue; }
+            hexCells[k] = v;
+        }
+        return { version: 3, hexCells, textLabels, originPoint, alliances: d.alliances || [], zoom: d.zoom, offset: d.offset };
+    };
     const loadLocal = () => {
         try {
             const raw = JSON.parse(localStorage.getItem('glory_planner'));
             if (!raw) return false;
-            // F06-2: 無版號或版號過舊 → 先 migrate
-            const d = (!raw.version || raw.version < 2) ? migrate_v1_to_v2(raw) : raw;
-            if (d.cells) { skipHistory.current = true; setCells(d.cells); }
+            // A05: migrate v1/v2 flat cells → v3 split
+            const d = (!raw.version || raw.version < 3) ? migrateToV3(raw) : raw;
+            skipHistory.current = true;
+            setHexCells(d.hexCells || {});
+            setTextLabels(d.textLabels || {});
+            setOriginPoint(d.originPoint || null);
             if (d.alliances) { setAlliances(d.alliances); setActiveAllianceId(d.alliances[0]?.id || null); }
             if (d.zoom) { zoomRef.current = d.zoom; setZoom(d.zoom); }
             if (d.offset) offsetRef.current = d.offset;
-            historyRef.current = [JSON.parse(JSON.stringify(d.cells || {}))]; historyIdx.current = 0;
+            historyRef.current = [JSON.parse(JSON.stringify(d.hexCells || {}))]; historyIdx.current = 0;
             return true;
         } catch { return false; }
     };
-    const resetMap = () => { if (!window.confirm('確定重置？')) return; skipHistory.current = true; setCells({}); setAlliances([]); setActiveAllianceId(null); historyRef.current = [{}]; historyIdx.current = 0; showToast('🗑️ 已重置'); };
+    const resetMap = () => { if (!window.confirm('確定重置？')) return; skipHistory.current = true; setHexCells({}); setTextLabels({}); setOriginPoint(null); setAlliances([]); setActiveAllianceId(null); historyRef.current = [{}]; historyIdx.current = 0; showToast('🗑️ 已重置'); };
 
     useEffect(() => { loadLocal(); }, []);
 
     const exportJSON = () => {
-        const data = { version: 1, type: 'glory', alliances: alliancesRef.current, cells: cellsRef.current, exportedAt: new Date().toISOString() };
+        const data = { version: 3, type: 'glory', alliances: alliancesRef.current, hexCells: hexCellsRef.current, textLabels: textLabelsRef.current, originPoint: originRef.current, exportedAt: new Date().toISOString() };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const link = document.createElement('a'); link.download = `glory-map-${new Date().toISOString().slice(0, 10)}.json`;
         link.href = URL.createObjectURL(blob); link.click(); URL.revokeObjectURL(link.href);
@@ -644,8 +660,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             const reader = new FileReader();
             reader.onload = (ev) => {
                 try {
-                    const d = JSON.parse(ev.target.result);
-                    if (d.cells) { skipHistory.current = true; setCells(d.cells); }
+                    const raw = JSON.parse(ev.target.result);
+                    const d = (!raw.version || raw.version < 3) ? migrateToV3(raw) : raw;
+                    skipHistory.current = true;
+                    setHexCells(d.hexCells || {});
+                    setTextLabels(d.textLabels || {});
+                    setOriginPoint(d.originPoint || null);
                     if (d.alliances) { setAlliances(d.alliances); setActiveAllianceId(d.alliances[0]?.id || null); }
                     centerMap(); showToast('📂 已載入');
                 } catch { showToast('❌ 格式錯誤'); }
@@ -662,7 +682,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             const id = `glory_${Date.now()}`;
             await setDoc(doc(db, 'shared_maps', id), {
                 title, mapMode: 'glory',
-                cells: cellsRef.current, alliances: alliancesRef.current,
+                hexCells: hexCellsRef.current, textLabels: textLabelsRef.current, originPoint: originRef.current, alliances: alliancesRef.current,
                 publishedAt: serverTimestamp(),
             });
             showToast('☁️ 已發佈到共享區！');
@@ -678,7 +698,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         setSharedLoading(false);
     };
     const copySharedMap = (map) => {
-        if (map.cells) { skipHistory.current = true; setCells(JSON.parse(JSON.stringify(map.cells))); }
+        const raw = map;
+        const d = (!raw.version || raw.version < 3) ? migrateToV3(raw) : raw;
+        skipHistory.current = true;
+        setHexCells(JSON.parse(JSON.stringify(d.hexCells || {})));
+        setTextLabels(JSON.parse(JSON.stringify(d.textLabels || {})));
+        setOriginPoint(d.originPoint || null);
         if (map.alliances) { setAlliances(map.alliances); setActiveAllianceId(map.alliances[0]?.id || null); }
         historyRef.current = [JSON.parse(JSON.stringify(map.cells || {}))]; historyIdx.current = 0;
         centerMap(); setShowShared(false);
@@ -692,13 +717,13 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
 
     const exportPositions = () => {
-        if (!cellsRef.current.origin) {
+        if (!originRef.current) {
             showToast('❌ 請先校正原點座標！');
             return;
         }
 
-        const { q: q0, r: r0, x: x0, y: y0 } = cellsRef.current.origin;
-        const cs = cellsRef.current;
+        const { q: q0, r: r0, x: x0, y: y0 } = originRef.current;
+        const cs = hexCellsRef.current;
         const as = alliancesRef.current;
 
         const output = [];
@@ -773,7 +798,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
 
     const exportImage = () => {
         const as = alliancesRef.current;
-        const cs = cellsRef.current;
+        const cs = hexCellsRef.current;
+        const tl = textLabelsRef.current;
         let minPx = Infinity, maxPx = -Infinity, minPy = Infinity, maxPy = -Infinity;
         for (const a of as) {
             for (const lv of [1, 2, 3]) {
@@ -783,13 +809,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 minPy = Math.min(minPy, b.top); maxPy = Math.max(maxPy, b.bottom);
             }
         }
+        for (const t of Object.values(tl)) {
+            minPx = Math.min(minPx, t.x - 100); maxPx = Math.max(maxPx, t.x + 100);
+            minPy = Math.min(minPy, t.y - 40); maxPy = Math.max(maxPy, t.y + 40);
+        }
         for (const key of Object.keys(cs)) {
-            if (key.startsWith('text_')) {
-                const t = cs[key];
-                minPx = Math.min(minPx, t.x - 100); maxPx = Math.max(maxPx, t.x + 100);
-                minPy = Math.min(minPy, t.y - 40); maxPy = Math.max(maxPy, t.y + 40);
-                continue;
-            }
             const [q, r] = key.split(',').map(Number);
             if (isNaN(q) || isNaN(r)) continue;
             const [x, y] = hex2px(q, r);
@@ -809,7 +833,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         tCtx.fillStyle = '#0f172a'; tCtx.fillRect(0, 0, w, h);
         tCtx.translate(w / 2 - centerX, h / 2 - centerY);
         const exportBounds = { left: centerX - w / 2, right: centerX + w / 2, top: centerY - h / 2, bottom: centerY + h / 2 };
-        drawGloryMap(tCtx, cs, as, null, null, exportBounds, false);
+        drawGloryMap(tCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, as, null, null, exportBounds, false);
 
         // ── Legend panel ──
         const LEGEND_H = 48;
@@ -932,7 +956,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         const hl = highlightRef.current;
         const hlAge = hl ? (Date.now() - hl.startTime) : 0;
         if (hl && hlAge >= 2000) highlightRef.current = null;
-        drawGloryMap(ctx, cellsRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+        drawGloryMap(ctx, hexCellsRef.current, textLabelsRef.current, originRef.current, alliancesRef.current, activeIdRef.current, hoveredHex.current, viewBounds, showCoordsRef.current, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
         // Keep animating while highlight is active
         if (hl && hlAge < 2000) requestAnimationFrame(draw);
         ctx.restore();
@@ -944,7 +968,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     };
 
     const getHoverCoordLabel = useCallback((q, r) => {
-        const origin = cellsRef.current?.origin;
+        const origin = originRef.current;
         if (origin) {
             const { q: q0, r: r0, x: x0, y: y0 } = origin;
             const gy = r - r0 + y0;
@@ -958,9 +982,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         dragStart.current = { x: e.clientX, y: e.clientY };
         const [wx, wy] = getWorldPos(e);
         if (toolRef.current === 'hand' && e.button === 0) {
-            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
             if (hitText) {
-                draggingText.current = { id: hitText, startX: wx, startY: wy, ix: cellsRef.current[hitText].x, iy: cellsRef.current[hitText].y };
+                draggingText.current = { id: hitText, startX: wx, startY: wy, ix: textLabelsRef.current[hitText].x, iy: textLabelsRef.current[hitText].y };
                 e.preventDefault(); return;
             }
         }
@@ -975,7 +999,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         if (draggingText.current) {
             const dragInfo = draggingText.current;
             const dx = wx - dragInfo.startX, dy = wy - dragInfo.startY;
-            setCells(prev => {
+            setTextLabels(prev => {
                 if (!dragInfo.id || !prev[dragInfo.id]) return prev;
                 return { ...prev, [dragInfo.id]: { ...prev[dragInfo.id], x: dragInfo.ix + dx, y: dragInfo.iy + dy } };
             });
@@ -994,7 +1018,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             return;
         }
         if (toolRef.current === 'hand') {
-            const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+            const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
             if (hitText !== hoveredTextId) { setHoveredTextId(hitText); requestDraw(); }
         }
         const [hq, hr] = px2hex(wx, wy);
@@ -1010,7 +1034,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         if (draggingText.current) { draggingText.current = null; requestDraw(); }
         const wasPainting = isPainting.current; // F02-1: 記錄是否剛結束拖曳
         isDragging.current = false; setIsPanning(false); isPainting.current = false; lastPaintHex.current = null;
-        if (wasPainting) pushHistory(cellsRef.current); // 整段拖曳只推一次
+        if (wasPainting) pushHistory(hexCellsRef.current); // 整段拖曳只推一次
     };
     const handleClick = (e) => {
         const dx = e.clientX - dragStart.current.x, dy = e.clientY - dragStart.current.y;
@@ -1023,19 +1047,19 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const handleDoubleClick = (e) => {
         e.preventDefault();
         const [wx, wy] = getWorldPos(e);
-        const hitText = Object.keys(cellsRef.current).find(k => k.startsWith('text_') && Math.hypot(cellsRef.current[k].x - wx, cellsRef.current[k].y - wy) < 20);
+        const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
         if (hitText) {
-            const t = cellsRef.current[hitText];
+            const t = textLabelsRef.current[hitText];
             setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
             return;
         }
         const [q, r] = px2hex(wx, wy);
         if (toolRef.current === 'origin') { setOriginInput({ q, r }); return; }
-        const cell = cellsRef.current[`${q},${r}`];
+        const cell = hexCellsRef.current[`${q},${r}`];
         if (cell?.isCenter && (cell.type === 'hq' || cell.type === 'center')) {
             const name = prompt('輸入名稱（留空清除）', cell.label || '');
             if (name === null) return;
-            setCells(prev => ({ ...prev, [`${q},${r}`]: { ...prev[`${q},${r}`], label: name.trim() || undefined } }));
+            setHexCells(prev => ({ ...prev, [`${q},${r}`]: { ...prev[`${q},${r}`], label: name.trim() || undefined } }));
         }
     };
 
@@ -1059,32 +1083,45 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current || '#ffffff', size: textSizeRef.current, editId: null });
             return;
         }
-        setCells(prev => {
+        if (t === 'origin') {
+            setOriginInput({ q, r });
+            return;
+        }
+        if (t === 'eraser') {
+            // Check if clicking near a text label
+            const textKey = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 15);
+            if (textKey) {
+                setTextLabels(prev => { const nc = { ...prev }; delete nc[textKey]; return nc; });
+                return;
+            }
+            // Otherwise erase hex cell
+            setHexCells(prev => {
+                const key = `${q},${r}`, nc = { ...prev };
+                const tgt = nc[key];
+                if (tgt?.isCenter && tgt.type === 'center') {
+                    CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
+                    Object.keys(nc).forEach(k => {
+                        if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
+                    });
+                    setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
+                } else if (tgt?.parent && tgt.type === 'center') {
+                    const [pq, pr] = tgt.parent.split(',').map(Number);
+                    CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
+                    Object.keys(nc).forEach(k => {
+                        if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
+                    });
+                    setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
+                } else if (tgt?.parent && tgt.type === 'hq') {
+                    const [pq, pr] = tgt.parent.split(',').map(Number);
+                    HQ_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
+                } else { delete nc[key]; }
+                return nc;
+            });
+            return;
+        }
+        setHexCells(prev => {
             const key = `${q},${r}`, nc = { ...prev };
-            if (t === 'eraser') {
-                const textKey = Object.keys(nc).find(k => k.startsWith('text_') && Math.hypot(nc[k].x - wx, nc[k].y - wy) < 15);
-                if (textKey) { delete nc[textKey]; }
-                else {
-                    const tgt = nc[key];
-                    if (tgt?.isCenter && tgt.type === 'center') {
-                        CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${q + oq},${r + or}`]);
-                        Object.keys(nc).forEach(k => {
-                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
-                        });
-                        setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
-                    } else if (tgt?.parent && tgt.type === 'center') {
-                        const [pq, pr] = tgt.parent.split(',').map(Number);
-                        CENTER_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
-                        Object.keys(nc).forEach(k => {
-                            if (nc[k]?.type === 'building' && nc[k].allianceId === tgt.allianceId && nc[k].level === tgt.level) delete nc[k];
-                        });
-                        setAlliances(p => p.map(a => a.id === tgt.allianceId ? { ...a, centers: { ...a.centers, [tgt.level]: null } } : a));
-                    } else if (tgt?.parent && tgt.type === 'hq') {
-                        const [pq, pr] = tgt.parent.split(',').map(Number);
-                        HQ_SHAPE.forEach(([oq, or]) => delete nc[`${pq + oq},${pr + or}`]);
-                    } else { delete nc[key]; }
-                }
-            } else if (t === 'center') {
+            if (t === 'center') {
                 if (!alliance) { showToast('❌ 請先選擇聯盟'); return prev; }
                 if (alliance.centers[lv]) { showToast(`❌ 已有 Lv${lv} 中心`); return prev; }
                 const blocked = CENTER_SHAPE.some(([oq, or]) => nc[`${q + oq},${r + or}`]);
@@ -1093,8 +1130,6 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                     nc[`${q + oq},${r + or}`] = { type: 'center', allianceId: aid, level: lv, color: alliance.color, parent: key, isCenter: oq === 0 && or === 0 };
                 });
                 setAlliances(p => p.map(a => a.id === aid ? { ...a, centers: { ...a.centers, [lv]: { q, r } } } : a));
-            } else if (t === 'origin') {
-                setOriginInput({ q, r });
             } else if (t === 'building' || t === 'flex_building') {
                 if (t === 'building') {
                     if (!alliance) return prev;
@@ -1335,7 +1370,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                             draggingText.current = null;
                             hoveredHex.current = null;
                             setHoverCoordText('');
-                            if (wasPainting) pushHistory(cellsRef.current); // F02-1: 滑鼠離開也補推
+                            if (wasPainting) pushHistory(hexCellsRef.current); // F02-1: 滑鼠離開也補推
                             requestDraw();
                         }}
                         onContextMenu={e => e.preventDefault()} />
@@ -1365,12 +1400,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                     const val = e.target.value.trim();
                                     if (val) {
                                         if (textInput.editId) {
-                                            setCells(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size } }));
+                                            setTextLabels(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size } }));
                                         } else {
-                                            setCells(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size } }));
+                                            setTextLabels(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size } }));
                                         }
                                     } else if (textInput.editId) {
-                                        setCells(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
+                                        setTextLabels(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
                                     }
                                     setTextInput(null);
                                 } else if (e.key === 'Escape') { setTextInput(null); }
@@ -1387,7 +1422,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 const x = parseInt(e.target.x.value, 10);
                                 const y = parseInt(e.target.y.value, 10);
                                 if (!isNaN(x) && !isNaN(y)) {
-                                    setCells(prev => ({ ...prev, origin: { q: originInput.q, r: originInput.r, x, y } }));
+                                    setOriginPoint({ q: originInput.q, r: originInput.r, x, y });
                                     showToast(`📍 座標已校正為 (${x}, ${y})`);
                                     setShowCoords(true);
                                 }
@@ -1400,9 +1435,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                     <button type="submit" className="px-3 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold">確定</button>
                                 </div>
                             </form>
-                            {cells.origin && (
+                            {originPoint && (
                                 <button onClick={() => {
-                                    setCells(prev => { const nc = { ...prev }; delete nc.origin; return nc; });
+                                    setOriginPoint(null);
                                     setOriginInput(null); showToast('🗑️ 已移除自訂座標原點');
                                 }} className="mt-1 text-[10px] text-red-500 hover:text-red-400 self-end uppercase">
                                     清除座標基準點
