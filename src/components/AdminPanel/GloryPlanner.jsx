@@ -2,7 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
-    Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle, Eraser
+    Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle, Eraser,
+    AlignLeft, AlignCenter, AlignRight
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -161,8 +162,21 @@ const getZoneBounds = (cq, cr) => {
     };
 };
 
+// Check if world point (wx, wy) hits a text label — uses font metrics estimate
+function hitTestText(wx, wy, cell) {
+    const sz = typeof cell.size === 'number' ? cell.size : ({ S: 14, M: 24, L: 36 }[cell.size] || 20);
+    const lines = (cell.label || '').split('\n');
+    const lineH = sz * 1.35;
+    const totalH = lines.length * lineH;
+    const maxChars = Math.max(...lines.map(l => l.length));
+    const estW = Math.max(maxChars * sz * 0.6, sz * 2);
+    const ax = cell.align === 'left' ? cell.x - sz * 4 : cell.align === 'right' ? cell.x + sz * 4 : cell.x;
+    return wx >= ax - estW / 2 - 10 && wx <= ax + estW / 2 + 10 &&
+        wy >= cell.y - totalH / 2 - 10 && wy <= cell.y + totalH / 2 + 10;
+}
+
 // A01: Background layer - hex grid, zones, buildings, text labels (redraws only on data change)
-function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activeId, viewBounds, showCoords = false) {
+function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activeId, viewBounds, showCoords = false, editingLabelId = null) {
     const cells = hexCells;
     const { left, right, top, bottom } = viewBounds;
     const zones = [];
@@ -288,15 +302,25 @@ function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activ
         }
     }
     // Text labels
-    const TEXT_SIZES = { S: 14, M: 24, L: 36 };
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
-    for (const [, cell] of Object.entries(textLabels || {})) {
-        const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
-        ctx.font = `bold ${sz}px sans-serif`; ctx.fillStyle = cell.color || 'white';
-        ctx.fillText(cell.label, cell.x, cell.y);
+    // Text labels — multiline + align support (skip editingId to prevent ghost)
+    ctx.shadowColor = 'rgba(0,0,0,0.9)'; ctx.shadowBlur = 5;
+    for (const [key, cell] of Object.entries(textLabels || {})) {
+        if (editingLabelId && key === editingLabelId) continue; // hide while editing
+        const sz = typeof cell.size === 'number' ? cell.size : ({ S: 14, M: 24, L: 36 }[cell.size] || 20);
+        const align = cell.align || 'center';
+        ctx.font = `bold ${sz}px sans-serif`;
+        ctx.textAlign = align; ctx.textBaseline = 'middle';
+        const lines = (cell.label || '').split('\n');
+        const lineH = sz * 1.35;
+        const totalH = lines.length * lineH;
+        // Anchor x based on align
+        const ax = align === 'left' ? cell.x - sz * 4 : align === 'right' ? cell.x + sz * 4 : cell.x;
+        ctx.fillStyle = cell.color || 'white';
+        lines.forEach((line, i) => {
+            ctx.fillText(line, ax, cell.y - totalH / 2 + (i + 0.5) * lineH);
+        });
     }
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 0; ctx.textAlign = 'center';
 }
 
 // A01: Interaction layer - hover, ghost preview, highlight ring, hovered text highlight (every mousemove)
@@ -399,14 +423,16 @@ function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewB
     // Hovered text label highlight
     if (hoveredTextId && textLabels?.[hoveredTextId]) {
         const cell = textLabels[hoveredTextId];
-        const TEXT_SIZES = { S: 14, M: 24, L: 36 };
+        const sz = typeof cell.size === 'number' ? cell.size : ({ S: 14, M: 24, L: 36 }[cell.size] || 20);
         ctx.save();
-        ctx.shadowColor = 'rgba(245, 158, 11, 0.8)'; ctx.shadowBlur = 8;
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
-        const sz = TEXT_SIZES[cell.size] || TEXT_SIZES.M;
         ctx.font = `bold ${sz}px sans-serif`;
-        const textWidth = ctx.measureText(cell.label).width;
-        ctx.fillRect(cell.x - textWidth / 2 - 5, cell.y - sz / 2, textWidth + 10, sz);
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.8)'; ctx.shadowBlur = 8;
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
+        const lines = (cell.label || '').split('\n');
+        const lineH = sz * 1.3;
+        const totalH = lines.length * lineH;
+        const maxW = Math.max(...lines.map(l => ctx.measureText(l).width));
+        ctx.fillRect(cell.x - maxW / 2 - 6, cell.y - totalH / 2 - 4, maxW + 12, totalH + 8);
         ctx.restore();
     }
 }
@@ -436,8 +462,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [showShared, setShowShared] = useState(false);
     const [sharedMaps, setSharedMaps] = useState([]);
     const [sharedLoading, setSharedLoading] = useState(false);
-    const [textColor, setTextColor] = useState(null);
-    const [textSize, setTextSize] = useState('M');
+    const [textColor, setTextColor] = useState('#ffffff');
+    const [textSize, setTextSize] = useState(20);
+    const [textAlign, setTextAlign] = useState('center'); // 'left' | 'center' | 'right'
     const [textInput, setTextInput] = useState(null);
     const [originInput, setOriginInput] = useState(null);
     const [isPanning, setIsPanning] = useState(false);
@@ -446,8 +473,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [exportTextData, setExportTextData] = useState('');
     const [hoverCoordText, setHoverCoordText] = useState('');
     const [showHelp, setShowHelp] = useState(false);
-    const [hqLoadingId, setHqLoadingId] = useState(null);
-    const [panelCollapsed, setPanelCollapsed] = useState(false); // A03: mobile panel toggle // A02: 'aid_lv' while Worker is running
+
+    const [panelCollapsed, setPanelCollapsed] = useState(false); // A03: mobile panel toggle
+    const [toolPopover, setToolPopover] = useState(null); // 'lv' | 'text' | null // A02: 'aid_lv' while Worker is running
 
     const canvasRef = useRef(null); const bgCanvasRef = useRef(null); const containerRef = useRef(null);
     const bgDirtyRef = useRef(true); // A01: true = background needs redraw
@@ -460,10 +488,11 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const isDragging = useRef(false); const isPainting = useRef(false);
     const lastPos = useRef({ x: 0, y: 0 }); const dragStart = useRef({ x: 0, y: 0 });
     const lastPaintHex = useRef(null); const draggingText = useRef(null);
-    const textColorRef = useRef(null); const textSizeRef = useRef('M');
+    const textColorRef = useRef('#ffffff'); const textSizeRef = useRef(20); const textAlignRef = useRef('center');
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
     const highlightRef = useRef(null); // { keys: Set<string>, startTime: number } | null
+    const textInputRef = useRef(null);     // for drawBackground ghost fix
     const touchStartPos = useRef(null);   // A03: { x, y } for single-finger tap detection
     const pinchStartDist = useRef(null);  // A03: initial distance for pinch-to-zoom
     const pinchStartZoom = useRef(null);  // A03: zoom at pinch start
@@ -489,6 +518,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { activeIdRef.current = activeAllianceId; bgDirtyRef.current = true; requestDraw(); }, [activeAllianceId]);
     useEffect(() => { textColorRef.current = textColor; }, [textColor]);
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
+    useEffect(() => { textAlignRef.current = textAlign; }, [textAlign]);
+    useEffect(() => { textInputRef.current = textInput; if (textInput !== null) { bgDirtyRef.current = true; requestDraw(); } else { bgDirtyRef.current = true; requestDraw(); } }, [textInput]);
     useEffect(() => { showCoordsRef.current = showCoords; bgDirtyRef.current = true; requestDraw(); }, [showCoords]);
 
     // F03: 一次掃描產生計數 map，供 countBuildings 使用
@@ -570,155 +601,65 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         showToast(`⛺ 已填充 ${quota - used - remaining} 棟`);
     };
 
-    // ── 防總部封鎖：A02 Web Worker 非同步版本，UI 不凍結 ──
+    // ── 防總部封鎖：同步版本（CSP 不允許 Blob Worker）──
     const antiHQFill = (aid, lv) => {
         const alliance = alliancesRef.current.find(a => a.id === aid);
         if (!alliance?.centers[lv]) return;
-        if (hqLoadingId) return; // 已在計算中，防止重複點擊
         const { q: cq, r: cr } = alliance.centers[lv];
-        const loadingId = `${aid}_${lv}`;
-        setHqLoadingId(loadingId);
 
-        // A02: Worker 程式碼內嵌為 Blob URL，不需要獨立檔案
-        const workerCode = `
-const HQ_SHAPE = [[0,0],[1,-1],[1,0],[0,1],[-1,1],[-1,0],[0,-1]];
-const ZONE_HALF = 13;
-const toOffsetCol = (q, r) => q + Math.floor((r + 1) / 2);
-const isInZone = (q, r, cq, cr) => {
-    if (Math.abs(r - cr) > ZONE_HALF) return false;
-    const col = toOffsetCol(q, r);
-    const cCol = toOffsetCol(cq, cr);
-    return Math.abs(col - cCol) <= ZONE_HALF;
-};
-const getZoneHexes = (cq, cr) => {
-    const cCol = toOffsetCol(cq, cr);
-    const hexes = [];
-    for (let r = cr - ZONE_HALF; r <= cr + ZONE_HALF; r++) {
-        for (let col = cCol - ZONE_HALF; col <= cCol + ZONE_HALF; col++) {
-            hexes.push([col - Math.floor((r + 1) / 2), r]);
+        const blockerKeys = computeHQBlockingSet(cq, cr, hexCellsRef.current);
+
+        // ── 由近到遠排序 ──
+        const hexDist = (q, r) => { const dq = q - cq, dr = r - cr; return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2; };
+        blockerKeys.sort((a, b) => {
+            const [aq, ar] = a.split(',').map(Number);
+            const [bq, br] = b.split(',').map(Number);
+            return hexDist(aq, ar) - hexDist(bq, br);
+        });
+
+        if (blockerKeys.length === 0) { showToast('✅ 區域已完全封鎖，無需額外建築'); return; }
+
+        const quota = getQuota(alliance, lv);
+        const used = countBuildings(aid, lv);
+        const available = quota - used;
+
+        if (blockerKeys.length > available) {
+            const ok = window.confirm(
+                `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，
+` +
+                `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。
+
+` +
+                `要用盡剩餘配額盡量封鎖嗎？（會從聯盟中心往外優先放置）`
+            );
+            if (!ok) return;
         }
-    }
-    return hexes;
-};
-const computeHQBlockingSet = (cq, cr, existingCells) => {
-    const zoneHexes = getZoneHexes(cq, cr);
-    const zoneSet = new Set(zoneHexes.map(([q, r]) => q + ',' + r));
-    const occupied = new Set(Object.keys(existingCells).filter(k => existingCells[k]));
-    const hqPlacements = [];
-    for (const [hq, hr] of zoneHexes) {
-        const footprint = HQ_SHAPE.map(([oq, or]) => (hq+oq) + ',' + (hr+or));
-        if (!footprint.every(k => zoneSet.has(k))) continue;
-        if (footprint.some(k => occupied.has(k))) continue;
-        hqPlacements.push(footprint);
-    }
-    if (hqPlacements.length === 0) return [];
-    const hexToIdx = new Map();
-    hqPlacements.forEach((fp, idx) => { for (const k of fp) { if (!hexToIdx.has(k)) hexToIdx.set(k, []); hexToIdx.get(k).push(idx); } });
-    const coverCnt = new Array(hqPlacements.length).fill(0);
-    const firstCovered = new Array(hqPlacements.length).fill(false);
-    const score = new Map();
-    for (const [k, idxs] of hexToIdx) { if (!occupied.has(k) && zoneSet.has(k)) score.set(k, idxs.length); }
-    const chosen = new Set();
-    let totalUnblocked = hqPlacements.length;
-    while (totalUnblocked > 0) {
-        let bestKey = null, bestScore = 0;
-        for (const [k, s] of score) { if (s > bestScore) { bestScore = s; bestKey = k; } }
-        if (!bestKey || bestScore === 0) break;
-        chosen.add(bestKey); score.delete(bestKey);
-        for (const idx of (hexToIdx.get(bestKey) || [])) {
-            coverCnt[idx]++;
-            if (!firstCovered[idx]) {
-                firstCovered[idx] = true; totalUnblocked--;
-                for (const k2 of hqPlacements[idx]) { if (score.has(k2)) { const ns = score.get(k2) - 1; if (ns <= 0) score.delete(k2); else score.set(k2, ns); } }
+
+        const newlyPlaced = new Set();
+        setHexCells(prev => {
+            const nc = { ...prev };
+            let placed = 0;
+            const limit = Math.min(blockerKeys.length, available);
+            for (const k of blockerKeys) {
+                if (placed >= limit) break;
+                if (nc[k]) continue;
+                const [q, r] = k.split(',').map(Number);
+                if (!isInZone(q, r, cq, cr)) continue;
+                nc[k] = { type: 'building', allianceId: aid, level: lv, color: alliance.color };
+                newlyPlaced.add(k);
+                placed++;
             }
-        }
-    }
-    let improved = true;
-    while (improved) {
-        improved = false;
-        for (const key of [...chosen]) {
-            const idxs = hexToIdx.get(key) || [];
-            if (idxs.every(idx => coverCnt[idx] >= 2)) { chosen.delete(key); for (const idx of idxs) coverCnt[idx]--; improved = true; }
-        }
-    }
-    return [...chosen];
-};
-self.onmessage = ({ data: { cq, cr, hexCells } }) => {
-    const result = computeHQBlockingSet(cq, cr, hexCells);
-    self.postMessage({ blockerKeys: result });
-};
-        `;
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerUrl = URL.createObjectURL(blob);
-        const worker = new Worker(workerUrl);
-
-        worker.onmessage = ({ data: { blockerKeys } }) => {
-            worker.terminate();
-            URL.revokeObjectURL(workerUrl);
-            setHqLoadingId(null);
-
-            // ── 由近到遠排序 ──
-            const hexDist = (q, r) => { const dq = q - cq, dr = r - cr; return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2; };
-            blockerKeys.sort((a, b) => {
-                const [aq, ar] = a.split(',').map(Number);
-                const [bq, br] = b.split(',').map(Number);
-                return hexDist(aq, ar) - hexDist(bq, br);
-            });
-
-            if (blockerKeys.length === 0) { showToast('✅ 區域已完全封鎖，無需額外建築'); return; }
-
-            const currentAlliance = alliancesRef.current.find(a => a.id === aid);
-            if (!currentAlliance) return;
-            const quota = getQuota(currentAlliance, lv);
-            const used = countBuildings(aid, lv);
-            const available = quota - used;
-
-            if (blockerKeys.length > available) {
-                const ok = window.confirm(
-                    `需要放置 ${blockerKeys.length} 棟建築才能完全封鎖，\n` +
-                    `但配額只剩 ${available} 棟（總配額 ${quota}，已用 ${used}）。\n\n` +
-                    `要用盡剩餘配額盡量封鎖嗎？（會從聯盟中心往外優先放置）`
-                );
-                if (!ok) return;
+            if (placed < blockerKeys.length) {
+                showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
+            } else {
+                showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
             }
-
-            const newlyPlaced = new Set();
-            setHexCells(prev => {
-                const nc = { ...prev };
-                let placed = 0;
-                const limit = Math.min(blockerKeys.length, available);
-                for (const k of blockerKeys) {
-                    if (placed >= limit) break;
-                    if (nc[k]) continue;
-                    const [q, r] = k.split(',').map(Number);
-                    if (!isInZone(q, r, cq, cr)) continue;
-                    nc[k] = { type: 'building', allianceId: aid, level: lv, color: currentAlliance.color };
-                    newlyPlaced.add(k);
-                    placed++;
-                }
-                if (placed < blockerKeys.length) {
-                    showToast(`⚠️ 配額不足！放了 ${placed}/${blockerKeys.length} 棟，中心區域已優先封鎖`);
-                } else {
-                    showToast(`🛡️ 完成！放置 ${placed} 棟，區域內無法再放總部！`);
-                }
-                if (newlyPlaced.size > 0) {
-                    highlightRef.current = { keys: newlyPlaced, startTime: Date.now() };
-                    requestDraw();
-                }
-                return nc;
-            });
-        };
-
-        worker.onerror = (err) => {
-            worker.terminate();
-            URL.revokeObjectURL(workerUrl);
-            setHqLoadingId(null);
-            showToast('❌ 防總計算失敗');
-            console.error('hqWorker error:', err);
-        };
-
-        // Send data to worker (hexCells is serialisable plain object)
-        worker.postMessage({ cq, cr, hexCells: hexCellsRef.current });
+            if (newlyPlaced.size > 0) {
+                highlightRef.current = { keys: newlyPlaced, startTime: Date.now() };
+                requestDraw();
+            }
+            return nc;
+        });
     };
 
     const saveLocal = () => {
@@ -735,7 +676,9 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
             if (k.startsWith('text_')) { textLabels[k] = v; continue; }
             hexCells[k] = v;
         }
-        return { version: 3, hexCells, textLabels, originPoint, alliances: d.alliances || [], zoom: d.zoom, offset: d.offset };
+        // Merge: prefer existing d.textLabels (v3 independent field), fallback to extracted from cells
+        const mergedTextLabels = { ...textLabels, ...(d.textLabels || {}) };
+        return { version: 3, hexCells, textLabels: mergedTextLabels, originPoint, alliances: d.alliances || [], zoom: d.zoom, offset: d.offset };
     };
     const loadLocal = () => {
         try {
@@ -791,11 +734,8 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
         if (!title) return;
         try {
             const id = `glory_${Date.now()}`;
-            await setDoc(doc(db, 'shared_maps', id), {
-                title, mapMode: 'glory',
-                hexCells: hexCellsRef.current, textLabels: textLabelsRef.current, originPoint: originRef.current, alliances: alliancesRef.current,
-                publishedAt: serverTimestamp(),
-            });
+            const publishData = { version: 3, title, mapMode: 'glory', hexCells: hexCellsRef.current, textLabels: textLabelsRef.current, originPoint: originRef.current, alliances: alliancesRef.current, publishedAt: serverTimestamp() };
+            await setDoc(doc(db, 'shared_maps', id), publishData);
             showToast('☁️ 已發佈到共享區！');
         } catch (err) { showToast('❌ 發佈失敗：' + err.message); }
     };
@@ -812,11 +752,16 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
         const raw = map;
         const d = (!raw.version || raw.version < 3) ? migrateToV3(raw) : raw;
         skipHistory.current = true;
-        setHexCells(JSON.parse(JSON.stringify(d.hexCells || {})));
-        setTextLabels(JSON.parse(JSON.stringify(d.textLabels || {})));
+        const newHexCells = JSON.parse(JSON.stringify(d.hexCells || {}));
+        const newTextLabels = JSON.parse(JSON.stringify(d.textLabels || {}));
+        hexCellsRef.current = newHexCells;
+        textLabelsRef.current = newTextLabels;
+        setHexCells(newHexCells);
+        setTextLabels(newTextLabels);
         setOriginPoint(d.originPoint || null);
         if (map.alliances) { setAlliances(map.alliances); setActiveAllianceId(map.alliances[0]?.id || null); }
-        historyRef.current = [JSON.parse(JSON.stringify(map.cells || {}))]; historyIdx.current = 0;
+        historyRef.current = [JSON.parse(JSON.stringify(d.hexCells || {}))]; historyIdx.current = 0;
+        bgDirtyRef.current = true;
         centerMap(); setShowShared(false);
         showToast(`📋 已複製: ${map.title}`);
     };
@@ -1084,6 +1029,19 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
         const hlAge = hl ? (Date.now() - hl.startTime) : 0;
         if (hl && hlAge >= 2000) highlightRef.current = null;
 
+        // Check if world point (wx, wy) hits a text label — uses font metrics estimate
+        function hitTestText(wx, wy, cell) {
+            const sz = typeof cell.size === 'number' ? cell.size : ({ S: 14, M: 24, L: 36 }[cell.size] || 20);
+            const lines = (cell.label || '').split('\n');
+            const lineH = sz * 1.35;
+            const totalH = lines.length * lineH;
+            const maxChars = Math.max(...lines.map(l => l.length));
+            const estW = Math.max(maxChars * sz * 0.6, sz * 2);
+            const ax = cell.align === 'left' ? cell.x - sz * 4 : cell.align === 'right' ? cell.x + sz * 4 : cell.x;
+            return wx >= ax - estW / 2 - 10 && wx <= ax + estW / 2 + 10 &&
+                wy >= cell.y - totalH / 2 - 10 && wy <= cell.y + totalH / 2 + 10;
+        }
+
         // A01: Background layer - only redraw when dirty
         if (bgCanvas && bgDirtyRef.current) {
             bgDirtyRef.current = false;
@@ -1092,7 +1050,7 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
             bgCtx.save(); bgCtx.scale(dpr, dpr);
             bgCtx.translate(offsetRef.current.x, offsetRef.current.y);
             bgCtx.scale(z, z);
-            drawBackground(bgCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, alliancesRef.current, activeIdRef.current, viewBounds, showCoordsRef.current);
+            drawBackground(bgCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, alliancesRef.current, activeIdRef.current, viewBounds, showCoordsRef.current, textInputRef.current?.editId || null);
             bgCtx.restore();
         }
 
@@ -1206,10 +1164,11 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
     }, []);
 
     const handleMouseDown = (e) => {
+        setToolPopover(null); // close any open popover
         dragStart.current = { x: e.clientX, y: e.clientY };
         const [wx, wy] = getWorldPos(e);
         if (toolRef.current === 'hand' && e.button === 0) {
-            const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
+            const hitText = Object.keys(textLabelsRef.current).find(k => hitTestText(wx, wy, textLabelsRef.current[k]));
             if (hitText) {
                 draggingText.current = { id: hitText, startX: wx, startY: wy, ix: textLabelsRef.current[hitText].x, iy: textLabelsRef.current[hitText].y };
                 e.preventDefault(); return;
@@ -1245,7 +1204,7 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
             return;
         }
         if (toolRef.current === 'hand') {
-            const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
+            const hitText = Object.keys(textLabelsRef.current).find(k => hitTestText(wx, wy, textLabelsRef.current[k]));
             if (hitText !== hoveredTextId) { setHoveredTextId(hitText); requestDraw(); }
         }
         const [hq, hr] = px2hex(wx, wy);
@@ -1274,10 +1233,11 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
     const handleDoubleClick = (e) => {
         e.preventDefault();
         const [wx, wy] = getWorldPos(e);
-        const hitText = Object.keys(textLabelsRef.current).find(k => Math.hypot(textLabelsRef.current[k].x - wx, textLabelsRef.current[k].y - wy) < 20);
+        // Always allow editing text labels regardless of active tool
+        const hitText = Object.keys(textLabelsRef.current).find(k => hitTestText(wx, wy, textLabelsRef.current[k]));
         if (hitText) {
             const t = textLabelsRef.current[hitText];
-            setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: t.size || 'M', editId: hitText });
+            setTextInput({ x: t.x, y: t.y, val: t.label, color: t.color || '#ffffff', size: typeof t.size === 'number' ? t.size : 20, align: t.align || 'center', editId: hitText });
             return;
         }
         const [q, r] = px2hex(wx, wy);
@@ -1307,7 +1267,7 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
             else activeColor = alliance?.color || '#94a3b8';
         }
         if (t === 'text') {
-            setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current || '#ffffff', size: textSizeRef.current, editId: null });
+            setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current, size: textSizeRef.current, align: textAlignRef.current, editId: null });
             return;
         }
         if (t === 'origin') {
@@ -1392,107 +1352,129 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
 
     return (
         <div className="flex flex-col h-full min-h-0 w-full bg-slate-900 overflow-hidden border-t border-slate-700 shadow-2xl relative z-50">
-            <div className="p-2.5 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 flex items-center justify-between z-10 flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex bg-slate-800 rounded-lg p-1">
-                        <TabBtn onClick={() => onSwitchMap('svs')} icon={<MapIcon size={14} />} label="SVS" ac="bg-blue-600" />
-                        <TabBtn onClick={() => onSwitchMap('fishpond')} icon={<Fish size={14} />} label="魚池" ac="bg-rose-600" />
-                        <TabBtn active icon={<Shield size={14} />} label="榮耀" ac="bg-amber-600" />
-                    </div>
-                    <div className="h-6 w-px bg-slate-700" />
-                    <div className="flex bg-slate-800 rounded-lg p-1">
-                        <ToolBtn active={tool === 'hand'} onClick={() => setTool('hand')} icon={<Hand size={15} />} label="移動" />
-                        <ToolBtn active={tool === 'center'} onClick={() => setTool('center')} icon={<Shield size={15} />} label="聯盟中心" />
-                        <ToolBtn active={tool === 'building'} onClick={() => setTool('building')} icon="⛺" label="小建築" />
-                        <ToolBtn active={tool === 'flex_building'} onClick={() => setTool('flex_building')} icon="⛺✨" label="彈性建築(不限區域/配額)" />
-                        <ToolBtn active={tool === 'hq'} onClick={() => setTool('hq')} icon={<Home size={15} />} label="總部" />
-                        <ToolBtn active={tool === 'origin'} onClick={() => setTool('origin')} icon={<MapPin size={15} />} label="坐標校正" />
-                        <ToolBtn active={tool === 'text'} onClick={() => setTool('text')} icon={<Type size={15} />} label="文字" />
-                        <ToolBtn active={tool === 'eraser'} onClick={() => setTool('eraser')} icon={<Eraser size={15} />} label="橡皮擦" />
-                    </div>
-                    {(tool === 'center' || tool === 'building') && (
-                        <div className="flex bg-slate-800 rounded-lg p-1 gap-0.5">
-                            {[1, 2, 3].map(lv => (
-                                <button key={lv} onClick={() => setToolLevel(lv)}
-                                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors ${toolLevel === lv ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                                    Lv{lv}
-                                </button>
-                            ))}
+            <div className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800 z-10">
+                {/* Single toolbar row — never reflows */}
+                <div className="px-2.5 py-1.5 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                        <div className="flex bg-slate-800 rounded-lg p-1">
+                            <TabBtn onClick={() => onSwitchMap('svs')} icon={<MapIcon size={14} />} label="SVS" ac="bg-blue-600" />
+                            <TabBtn onClick={() => onSwitchMap('fishpond')} icon={<Fish size={14} />} label="魚池" ac="bg-rose-600" />
+                            <TabBtn active icon={<Shield size={14} />} label="榮耀" ac="bg-amber-600" />
                         </div>
-                    )}
-                    {(tool === 'text' || tool === 'hq' || tool === 'flex_building') && (
-                        <>
-                            <div className="flex gap-1.5 items-center bg-slate-800 rounded-lg p-1">
-                                {(tool === 'hq' || tool === 'flex_building') && activeAlliance && (
-                                    <button onClick={() => setTextColor(null)}
-                                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-transform ${!textColor ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
-                                        style={{ backgroundColor: activeAlliance.color }} title="跟隨聯盟顏色">
-                                        <Shield size={10} color="#fff" />
-                                    </button>
+                        <div className="h-6 w-px bg-slate-700" />
+                        <div className="flex bg-slate-800 rounded-lg p-1 relative">
+                            <ToolBtn active={tool === 'hand'} onClick={() => { setTool('hand'); setToolPopover(null); }} icon={<Hand size={15} />} label="移動" />
+                            {/* center/building: click shows Lv popover */}
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'center'} onClick={() => { setTool('center'); setToolPopover(p => p === 'lv' ? null : 'lv'); }} icon={<Shield size={15} />} label="聯盟中心" />
+                                {tool === 'center' && toolPopover === 'lv' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-1 flex gap-1" onMouseDown={e => e.stopPropagation()}>
+                                        {[1, 2, 3].map(lv => (
+                                            <button key={lv} onClick={() => { setToolLevel(lv); setToolPopover(null); }}
+                                                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors whitespace-nowrap ${toolLevel === lv ? 'bg-amber-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>
+                                                Lv{lv}
+                                            </button>
+                                        ))}
+                                    </div>
                                 )}
-                                {['#ffffff', '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#64748b'].map(c => {
-                                    const isSelected = textColor === c || (!textColor && tool === 'text' && c === '#ffffff');
-                                    return (
-                                        <button key={c} onClick={() => setTextColor(c)}
-                                            className={`w-5 h-5 rounded-full border-2 transition-transform ${isSelected ? 'border-white scale-110' : 'border-transparent opacity-50 hover:opacity-100'}`}
-                                            style={{ backgroundColor: c }} />
-                                    );
-                                })}
                             </div>
-                            {tool === 'text' && (
-                                <div className="flex bg-slate-800 rounded-lg p-0.5 gap-0.5">
-                                    {[['S', '小'], ['M', '中'], ['L', '大']].map(([k, label]) => (
-                                        <button key={k} onClick={() => setTextSize(k)}
-                                            className={`px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${textSize === k ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-700'}`}>
-                                            {label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </>
-                    )}
-                    <div className="h-6 w-px bg-slate-700" />
-                    <div className="flex bg-slate-800 rounded-lg p-1">
-                        <ToolBtn onClick={undo} icon={<Undo2 size={14} />} label="復原" />
-                        <ToolBtn onClick={redo} icon={<Redo2 size={14} />} label="重做" />
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'building'} onClick={() => { setTool('building'); setToolPopover(p => p === 'lv' ? null : 'lv'); }} icon="⛺" label="小建築" />
+                                {tool === 'building' && toolPopover === 'lv' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-lg shadow-xl p-1 flex gap-1" onMouseDown={e => e.stopPropagation()}>
+                                        {[1, 2, 3].map(lv => (
+                                            <button key={lv} onClick={() => { setToolLevel(lv); setToolPopover(null); }}
+                                                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors whitespace-nowrap ${toolLevel === lv ? 'bg-amber-600 text-white' : 'text-slate-300 hover:bg-slate-700'}`}>
+                                                Lv{lv}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <ToolBtn active={tool === 'flex_building'} onClick={() => { setTool('flex_building'); setToolPopover(null); }} icon="⛺✨" label="彈性建築(不限區域/配額)" />
+                            <ToolBtn active={tool === 'hq'} onClick={() => { setTool('hq'); setToolPopover(null); }} icon={<Home size={15} />} label="總部" />
+                            <ToolBtn active={tool === 'origin'} onClick={() => { setTool('origin'); setToolPopover(null); }} icon={<MapPin size={15} />} label="坐標校正" />
+                            {/* text tool: click shows style popover */}
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'text'} onClick={() => { setTool('text'); setToolPopover(p => p === 'text' ? null : 'text'); }} icon={<Type size={15} />} label="文字" />
+                                {tool === 'text' && toolPopover === 'text' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-xl shadow-xl p-2.5 flex flex-col gap-2 min-w-[200px]" onMouseDown={e => e.stopPropagation()}>
+                                        {/* Colors */}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            {['#ffffff', '#fbbf24', '#f87171', '#34d399', '#60a5fa', '#c084fc', '#fb923c', '#e2e8f0', '#94a3b8'].map(col => (
+                                                <button key={col} onClick={() => { setTextColor(col); setTextInput(p => p ? { ...p, color: col } : p); }}
+                                                    className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-all ${textColor === col ? 'border-white scale-110' : 'border-transparent opacity-70 hover:opacity-100'}`}
+                                                    style={{ backgroundColor: col }} />
+                                            ))}
+                                            <label className="w-5 h-5 rounded-full border-2 border-slate-500 hover:border-white cursor-pointer overflow-hidden relative flex-shrink-0" title="自訂">
+                                                <input type="color" value={textColor || '#ffffff'} onChange={e => { setTextColor(e.target.value); setTextInput(p => p ? { ...p, color: e.target.value } : p); }}
+                                                    className="absolute inset-0 opacity-0 w-[200%] h-[200%] -top-1/2 -left-1/2 cursor-pointer" />
+                                                <div className="w-full h-full pointer-events-none rounded-full" style={{ background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)' }} />
+                                            </label>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] text-slate-400 flex-shrink-0">大小</span>
+                                            <select value={textSize} onChange={e => { const v = Number(e.target.value); setTextSize(v); setTextInput(p => p ? { ...p, size: v } : p); }}
+                                                className="flex-1 bg-slate-900 border border-slate-600 rounded px-1.5 py-0.5 text-white text-[11px] outline-none">
+                                                {[12, 16, 20, 28, 36, 48].map(px => <option key={px} value={px}>{px}px</option>)}
+                                            </select>
+                                            <div className="flex bg-slate-900 rounded border border-slate-600">
+                                                {[['left', <AlignLeft size={11} />], ['center', <AlignCenter size={11} />], ['right', <AlignRight size={11} />]].map(([a, icon]) => (
+                                                    <button key={a} onClick={() => { setTextAlign(a); setTextInput(p => p ? { ...p, align: a } : p); }}
+                                                        className={`p-1 transition-colors ${textAlign === a ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                                        {icon}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <ToolBtn active={tool === 'eraser'} onClick={() => { setTool('eraser'); setToolPopover(null); }} icon={<Eraser size={15} />} label="橡皮擦" />
+                        </div>
+                        <div className="h-6 w-px bg-slate-700" />
+                        <div className="flex bg-slate-800 rounded-lg p-1">
+                            <ToolBtn onClick={undo} icon={<Undo2 size={14} />} label="復原" />
+                            <ToolBtn onClick={redo} icon={<Redo2 size={14} />} label="重做" />
+                        </div>
                     </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 bg-slate-800/60 px-2 py-1 rounded-xl border border-slate-700/50">
-                        <button onClick={() => { zoomRef.current = Math.max(0.1, zoomRef.current - 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomOut size={13} /></button>
-                        <input type="range" min="0.1" max="2.5" step="0.05" value={zoom} onChange={e => { zoomRef.current = parseFloat(e.target.value); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }}
-                            className="w-14 h-1 bg-slate-700 rounded cursor-pointer accent-amber-500" />
-                        <button onClick={() => { zoomRef.current = Math.min(2.5, zoomRef.current + 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomIn size={13} /></button>
-                        <span className="text-[9px] font-mono text-amber-400 w-7 text-center">{Math.round(zoom * 100)}%</span>
-                    </div>
-                    <button onClick={centerMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white border border-slate-700"><Maximize size={13} /></button>
-                    <button onClick={saveLocal} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-emerald-400 border border-slate-700" title="儲存 Ctrl+S"><Save size={13} /></button>
-                    <button onClick={resetMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-red-400 border border-slate-700" title="重設"><Trash2 size={13} /></button>
-                    <div className="h-6 w-px bg-slate-700" />
-                    <button onClick={exportJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-cyan-400 border border-slate-700" title="匯出 JSON"><Download size={13} /></button>
-                    <button onClick={importJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-yellow-400 border border-slate-700" title="匯入 JSON"><Upload size={13} /></button>
-                    {isAdmin && <>
-                        <button onClick={publishToCloud} title="發佈到共享區" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-violet-400 border border-slate-700"><Share2 size={13} /></button>
-                        <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="px-2 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold">
-                            ☁️ 共享
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 bg-slate-800/60 px-2 py-1 rounded-xl border border-slate-700/50">
+                            <button onClick={() => { zoomRef.current = Math.max(0.1, zoomRef.current - 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomOut size={13} /></button>
+                            <input type="range" min="0.1" max="2.5" step="0.05" value={zoom} onChange={e => { zoomRef.current = parseFloat(e.target.value); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }}
+                                className="w-14 h-1 bg-slate-700 rounded cursor-pointer accent-amber-500" />
+                            <button onClick={() => { zoomRef.current = Math.min(2.5, zoomRef.current + 0.1); setZoom(zoomRef.current); bgDirtyRef.current = true; requestDraw(); }} className="text-slate-400 hover:text-white"><ZoomIn size={13} /></button>
+                            <span className="text-[9px] font-mono text-amber-400 w-7 text-center">{Math.round(zoom * 100)}%</span>
+                        </div>
+                        <button onClick={centerMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white border border-slate-700"><Maximize size={13} /></button>
+                        <button onClick={saveLocal} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-emerald-400 border border-slate-700" title="儲存 Ctrl+S"><Save size={13} /></button>
+                        <button onClick={resetMap} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-red-400 border border-slate-700" title="重設"><Trash2 size={13} /></button>
+                        <div className="h-6 w-px bg-slate-700" />
+                        <button onClick={exportJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-cyan-400 border border-slate-700" title="匯出 JSON"><Download size={13} /></button>
+                        <button onClick={importJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-yellow-400 border border-slate-700" title="匯入 JSON"><Upload size={13} /></button>
+                        {isAdmin && <>
+                            <button onClick={publishToCloud} title="發佈到共享區" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-violet-400 border border-slate-700"><Share2 size={13} /></button>
+                            <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="px-2 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold">
+                                ☁️ 共享
+                            </button>
+                        </>}
+                        <div className="h-6 w-px bg-slate-700" />
+                        <button onClick={() => setShowHelp(true)} className="px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors">
+                            <HelpCircle size={12} className="text-amber-400" /> 說明
                         </button>
-                    </>}
-                    <div className="h-6 w-px bg-slate-700" />
-                    <button onClick={() => setShowHelp(true)} className="px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors">
-                        <HelpCircle size={12} className="text-amber-400" /> 說明
-                    </button>
-                    <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
-                        <Navigation size={12} /> 座標
-                    </button>
-                    <button onClick={exportPositions} title="匯出座標清單到剪貼簿" className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-emerald-500">
-                        📋 複製座標
-                    </button>
-                    <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-amber-500">
-                        📸 匯出圖片
-                    </button>
+                        <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
+                            <Navigation size={12} /> 座標
+                        </button>
+                        <button onClick={exportPositions} title="匯出座標清單到剪貼簿" className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-emerald-500">
+                            📋 複製座標
+                        </button>
+                        <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-amber-500">
+                            📸 匯出圖片
+                        </button>
+                    </div>
                 </div>
-            </div>
 
+            </div>
             <div className="flex flex-1 overflow-hidden relative">
                 {/* A03: Toggle button — lives OUTSIDE panel, always visible */}
                 <button onClick={() => setPanelCollapsed(v => !v)}
@@ -1556,9 +1538,8 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
                                                     </button>
                                                     <button onClick={(e) => { e.stopPropagation(); antiHQFill(a.id, lv); }}
                                                         title="自動放置最少建築，封鎖區域內所有可能的總部位置（由中心往外放）"
-                                                        disabled={!!hqLoadingId}
-                                                        className={`px-1.5 py-0.5 rounded text-[9px] transition-all ${hqLoadingId === `${a.id}_${lv}` ? 'bg-rose-600/40 text-rose-300 cursor-wait animate-pulse' : 'bg-rose-600/20 text-rose-400 hover:bg-rose-600/30'} ${hqLoadingId && hqLoadingId !== `${a.id}_${lv}` ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                                                        {hqLoadingId === `${a.id}_${lv}` ? '⏳計算中' : '🛡️防總'}
+                                                        className="px-1.5 py-0.5 bg-rose-600/20 text-rose-400 rounded text-[9px] hover:bg-rose-600/30">
+                                                        🛡️防總
                                                     </button>
                                                 </div>
                                             )}
@@ -1621,35 +1602,62 @@ self.onmessage = ({ data: { cq, cr, hexCells } }) => {
                         </div>
                     )}
 
-                    {textInput && (
-                        <input autoFocus defaultValue={textInput.val}
-                            style={{
-                                position: 'absolute',
-                                left: textInput.x * zoom + offsetRef.current.x,
-                                top: textInput.y * zoom + offsetRef.current.y,
-                                transform: 'translate(-50%, -50%)',
-                                color: textInput.color,
-                                fontSize: `${({ S: 14, M: 24, L: 36 }[textInput.size] || 24) * zoom}px`,
-                                textShadow: '0 0 4px black'
-                            }}
-                            className="bg-transparent border-b border-white outline-none text-center min-w-[100px] z-20 font-bold"
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                    const val = e.target.value.trim();
-                                    if (val) {
-                                        if (textInput.editId) {
-                                            setTextLabels(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size } }));
-                                        } else {
-                                            setTextLabels(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size } }));
-                                        }
-                                    } else if (textInput.editId) {
-                                        setTextLabels(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
-                                    }
-                                    setTextInput(null);
-                                } else if (e.key === 'Escape') { setTextInput(null); }
-                            }}
-                            onBlur={() => setTextInput(null)} />
-                    )}
+                    {textInput && (() => {
+                        const sx = textInput.x * zoom + offsetRef.current.x;
+                        const sy = textInput.y * zoom + offsetRef.current.y;
+                        const sz = typeof textInput.size === 'number' ? textInput.size : 20;
+                        const align = textInput.align || 'center';
+                        const submitText = () => {
+                            const val = textInput.val.trim();
+                            if (val) {
+                                if (textInput.editId) {
+                                    setTextLabels(prev => ({ ...prev, [textInput.editId]: { ...prev[textInput.editId], label: val, color: textInput.color, size: textInput.size, align: textInput.align } }));
+                                } else {
+                                    setTextLabels(prev => ({ ...prev, [`text_${Date.now()}`]: { type: 'text', label: val, x: textInput.x, y: textInput.y, color: textInput.color, size: textInput.size, align: textInput.align } }));
+                                }
+                            } else if (textInput.editId) {
+                                setTextLabels(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; });
+                            }
+                            setTextInput(null);
+                        };
+                        return (
+                            <div className="absolute inset-0 z-40" onMouseDown={e => { if (e.target === e.currentTarget) submitText(); }}>
+                                <div style={{ position: 'absolute', left: sx, top: sy, transform: 'translate(-50%, -50%)', minWidth: 120 }}
+                                    onMouseDown={e => e.stopPropagation()}>
+                                    {/* Transparent textarea - clean, no mini toolbar */}
+                                    <textarea autoFocus
+                                        value={textInput.val}
+                                        onChange={e => setTextInput(prev => ({ ...prev, val: e.target.value }))}
+                                        placeholder="輸入文字&#10;Shift+Enter 換行"
+                                        rows={Math.max(1, (textInput.val.match(/\n/g) || []).length + 1)}
+                                        style={{
+                                            fontSize: `${Math.min(sz, 32) * Math.min(zoom, 1.5)}px`,
+                                            color: textInput.color,
+                                            textAlign: align,
+                                            textShadow: '0 1px 4px rgba(0,0,0,0.9)',
+                                            lineHeight: 1.35,
+                                            width: '100%',
+                                            caretColor: textInput.color,
+                                        }}
+                                        className="bg-transparent border-0 outline-none resize-none font-bold placeholder-white/20 selection:bg-amber-500/40 w-full"
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitText(); }
+                                            else if (e.key === 'Escape') { setTextInput(null); }
+                                        }} />
+                                    {/* Bottom action row */}
+                                    <div className="flex items-center justify-between mt-1">
+                                        <span className="text-[9px] text-white/25">Enter 確認 · Esc 取消</span>
+                                        {textInput.editId && (
+                                            <button onMouseDown={e => { e.preventDefault(); setTextLabels(prev => { const nc = { ...prev }; delete nc[textInput.editId]; return nc; }); setTextInput(null); }}
+                                                className="text-red-400/60 hover:text-red-400 transition-colors" title="刪除">
+                                                <Trash2 size={10} />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
                     {originInput && (
                         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-900 border border-slate-700 p-4 rounded-xl shadow-2xl z-30 flex flex-col gap-3 min-w-[250px]">
