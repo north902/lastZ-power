@@ -463,6 +463,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [sharedMaps, setSharedMaps] = useState([]);
     const [sharedLoading, setSharedLoading] = useState(false);
     const [textColor, setTextColor] = useState('#ffffff');
+    const [hqColor, setHqColor] = useState(null); // null = follow alliance color (darkened)
     const [textSize, setTextSize] = useState(20);
     const [textAlign, setTextAlign] = useState('center'); // 'left' | 'center' | 'right'
     const [textInput, setTextInput] = useState(null);
@@ -475,7 +476,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [showHelp, setShowHelp] = useState(false);
 
     const [panelCollapsed, setPanelCollapsed] = useState(false); // A03: mobile panel toggle
-    const [toolPopover, setToolPopover] = useState(null); // 'lv' | 'text' | null // A02: 'aid_lv' while Worker is running
+    const [toolPopover, setToolPopover] = useState(null); // 'lv' | 'text' | 'hq' | null
 
     const canvasRef = useRef(null); const bgCanvasRef = useRef(null); const containerRef = useRef(null);
     const bgDirtyRef = useRef(true); // A01: true = background needs redraw
@@ -489,6 +490,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const lastPos = useRef({ x: 0, y: 0 }); const dragStart = useRef({ x: 0, y: 0 });
     const lastPaintHex = useRef(null); const draggingText = useRef(null);
     const textColorRef = useRef('#ffffff'); const textSizeRef = useRef(20); const textAlignRef = useRef('center');
+    const hqColorRef = useRef(null);
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
     const highlightRef = useRef(null); // { keys: Set<string>, startTime: number } | null
@@ -519,6 +521,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { textColorRef.current = textColor; }, [textColor]);
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
     useEffect(() => { textAlignRef.current = textAlign; }, [textAlign]);
+    useEffect(() => { hqColorRef.current = hqColor; }, [hqColor]);
     useEffect(() => { textInputRef.current = textInput; if (textInput !== null) { bgDirtyRef.current = true; requestDraw(); } else { bgDirtyRef.current = true; requestDraw(); } }, [textInput]);
     useEffect(() => { showCoordsRef.current = showCoords; bgDirtyRef.current = true; requestDraw(); }, [showCoords]);
 
@@ -1261,10 +1264,15 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const applyTool = (q, r, wx, wy) => {
         const t = toolRef.current, lv = toolLevelRef.current, aid = activeIdRef.current;
         const alliance = alliancesRef.current.find(a => a.id === aid);
-        let activeColor = textColorRef.current;
-        if (!activeColor) {
-            if (t === 'hq') activeColor = darkenHex(alliance?.color) || '#64748b';
-            else activeColor = alliance?.color || '#94a3b8';
+        let activeColor;
+        if (t === 'text') {
+            activeColor = textColorRef.current || '#ffffff';
+        } else if (t === 'hq') {
+            activeColor = hqColorRef.current || darkenHex(alliance?.color) || '#64748b';
+        } else if (t === 'flex_building') {
+            activeColor = alliance?.color || '#94a3b8';
+        } else {
+            activeColor = alliance?.color || '#94a3b8';
         }
         if (t === 'text') {
             setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current, size: textSizeRef.current, align: textAlignRef.current, editId: null });
@@ -1392,7 +1400,29 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 )}
                             </div>
                             <ToolBtn active={tool === 'flex_building'} onClick={() => { setTool('flex_building'); setToolPopover(null); }} icon="⛺✨" label="彈性建築(不限區域/配額)" />
-                            <ToolBtn active={tool === 'hq'} onClick={() => { setTool('hq'); setToolPopover(null); }} icon={<Home size={15} />} label="總部" />
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'hq'} onClick={() => { setTool('hq'); setToolPopover(p => p === 'hq' ? null : 'hq'); }} icon={<Home size={15} />} label="總部" />
+                                {tool === 'hq' && toolPopover === 'hq' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-xl shadow-xl p-2.5 flex flex-col gap-2 min-w-[180px]" onMouseDown={e => e.stopPropagation()}>
+                                        <span className="text-[10px] text-slate-400">總部顏色</span>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            {/* Auto = follow alliance color */}
+                                            <button onClick={() => setHqColor(null)}
+                                                className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${hqColor === null ? 'bg-amber-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>自動</button>
+                                            {['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#64748b', '#ffffff'].map(col => (
+                                                <button key={col} onClick={() => setHqColor(col)}
+                                                    className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-all ${hqColor === col ? 'border-white scale-110' : 'border-transparent opacity-70 hover:opacity-100'}`}
+                                                    style={{ backgroundColor: col }} />
+                                            ))}
+                                            <label className="w-5 h-5 rounded-full border-2 border-slate-500 hover:border-white cursor-pointer overflow-hidden relative flex-shrink-0" title="自訂色">
+                                                <input type="color" value={hqColor || '#64748b'} onChange={e => setHqColor(e.target.value)}
+                                                    className="absolute inset-0 opacity-0 w-[200%] h-[200%] -top-1/2 -left-1/2 cursor-pointer" />
+                                                <div className="w-full h-full pointer-events-none rounded-full" style={{ background: 'conic-gradient(red,yellow,lime,cyan,blue,magenta,red)' }} />
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             <ToolBtn active={tool === 'origin'} onClick={() => { setTool('origin'); setToolPopover(null); }} icon={<MapPin size={15} />} label="坐標校正" />
                             {/* text tool: click shows style popover */}
                             <div className="relative flex items-center">
