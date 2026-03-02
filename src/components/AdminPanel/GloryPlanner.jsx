@@ -3,7 +3,7 @@ import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
     Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle, Eraser,
-    AlignLeft, AlignCenter, AlignRight
+    AlignLeft, AlignCenter, AlignRight, Ban, Square
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -28,6 +28,7 @@ const HQ_SHAPE = CENTER_SHAPE;
 const ZONE_HALF = 13;
 const LEVEL_MULTI = { 1: 3, 2: 4, 3: 1 };
 const ALLIANCE_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
+const TERRAIN_COLORS = { mountain: '#4b5563', river: '#1e40af', enemy: '#991b1b' };
 const MAX_HISTORY = 20;
 
 const toOffsetCol = (q, r) => q + Math.floor((r + 1) / 2);
@@ -205,6 +206,7 @@ function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activ
             let fill = 'rgba(248,250,252,0.08)', stroke = 'rgba(186,230,253,0.12)', sw = 0.6;
             const hasCell = cell && cell.type !== 'hq_part';
             const isHq = cell?.type === 'hq';
+            const isTerrain = cell?.type === 'terrain';
             if (hasCell) { fill = cell.color || '#3b82f6'; stroke = 'rgba(255,255,255,0.6)'; sw = cell.isCenter ? 2 : 1; }
             ctx.beginPath();
             for (let i = 0; i < 6; i++) {
@@ -213,14 +215,27 @@ function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activ
             }
             ctx.closePath();
             ctx.fillStyle = fill;
-            ctx.globalAlpha = cell?.type === 'building' ? 0.65 : 1;
+            ctx.globalAlpha = cell?.type === 'building' ? 0.65 : (isTerrain ? 0.75 : 1);
             ctx.fill();
+            // Terrain hatching pattern
+            if (isTerrain) {
+                ctx.save(); ctx.clip();
+                ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
+                for (let d = -HEX_R * 2; d <= HEX_R * 2; d += 6) {
+                    ctx.beginPath(); ctx.moveTo(cx + d - HEX_R, cy - HEX_R); ctx.lineTo(cx + d + HEX_R, cy + HEX_R); ctx.stroke();
+                }
+                ctx.restore();
+                // Redraw hex path after clip restore for stroke
+                ctx.beginPath();
+                for (let i = 0; i < 6; i++) { const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1]; i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy); }
+                ctx.closePath();
+            }
             ctx.globalAlpha = 1;
             if (!hasCell && hexZones.length > 0) {
                 for (const z of hexZones) { ctx.fillStyle = hexAlpha(z.color, z.isActive ? 0.18 : 0.10); ctx.fill(); }
                 stroke = hexZones.some(z => z.isActive) ? 'rgba(148,163,184,0.3)' : 'rgba(148,163,184,0.18)';
             }
-            ctx.strokeStyle = stroke; ctx.lineWidth = sw;
+            ctx.strokeStyle = isTerrain ? 'rgba(255,255,255,0.35)' : stroke; ctx.lineWidth = sw;
             if (isHq) ctx.setLineDash([4, 4]);
             ctx.stroke();
             if (isHq) ctx.setLineDash([]);
@@ -355,8 +370,25 @@ function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewB
             }
         }
     }
+    // Ghost preview for terrain tool
+    if (hoveredHex && tool === 'terrain') {
+        const [hq, hr] = hoveredHex;
+        const [cx, cy] = hex2px(hq, hr);
+        const existing = cells[`${hq},${hr}`];
+        const blocked = existing && existing.type !== 'terrain';
+        ctx.save(); ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) { const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1]; i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy); }
+        ctx.closePath();
+        ctx.fillStyle = blocked ? 'rgba(239,68,68,0.6)' : 'rgba(100,116,139,0.6)';
+        ctx.fill();
+        ctx.strokeStyle = blocked ? 'rgba(255,50,50,0.9)' : 'rgba(255,255,255,0.7)';
+        ctx.lineWidth = 1.5; ctx.stroke();
+        if (!blocked) { ctx.font = '12px serif'; ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🚫', cx, cy); }
+        ctx.restore();
+    }
     // Ghost preview
-    if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'text') {
+    if (hoveredHex && tool && tool !== 'hand' && tool !== 'eraser' && tool !== 'text' && tool !== 'terrain') {
         const [hq, hr] = hoveredHex;
         let ghostShape = [];
         if (tool === 'hq' || tool === 'center') ghostShape = CENTER_SHAPE;
@@ -464,6 +496,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [sharedLoading, setSharedLoading] = useState(false);
     const [textColor, setTextColor] = useState('#ffffff');
     const [hqColor, setHqColor] = useState(null); // null = follow alliance color (darkened)
+    const [terrainColor, setTerrainColor] = useState('mountain'); // 'mountain' | 'river' | 'enemy'
+    const [terrainRect, setTerrainRect] = useState(false); // rectangle fill mode
     const [textSize, setTextSize] = useState(20);
     const [textAlign, setTextAlign] = useState('center'); // 'left' | 'center' | 'right'
     const [textInput, setTextInput] = useState(null);
@@ -491,6 +525,9 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const lastPaintHex = useRef(null); const draggingText = useRef(null);
     const textColorRef = useRef('#ffffff'); const textSizeRef = useRef(20); const textAlignRef = useRef('center');
     const hqColorRef = useRef(null);
+    const terrainColorRef = useRef('mountain');
+    const terrainRectRef = useRef(false);
+    const rectStartHex = useRef(null); // { q, r } for rectangle terrain mode
     const hoveredHex = useRef(null); const rafId = useRef(null); const dprRef = useRef(1);
     const historyRef = useRef([{}]); const historyIdx = useRef(0); const skipHistory = useRef(false);
     const highlightRef = useRef(null); // { keys: Set<string>, startTime: number } | null
@@ -522,6 +559,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { textSizeRef.current = textSize; }, [textSize]);
     useEffect(() => { textAlignRef.current = textAlign; }, [textAlign]);
     useEffect(() => { hqColorRef.current = hqColor; }, [hqColor]);
+    useEffect(() => { terrainColorRef.current = terrainColor; }, [terrainColor]);
+    useEffect(() => { terrainRectRef.current = terrainRect; }, [terrainRect]);
     useEffect(() => { textInputRef.current = textInput; if (textInput !== null) { bgDirtyRef.current = true; requestDraw(); } else { bgDirtyRef.current = true; requestDraw(); } }, [textInput]);
     useEffect(() => { showCoordsRef.current = showCoords; bgDirtyRef.current = true; requestDraw(); }, [showCoords]);
 
@@ -1063,6 +1102,42 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         ctx.translate(offsetRef.current.x, offsetRef.current.y);
         ctx.scale(z, z);
         drawInteraction(ctx, hexCellsRef.current, textLabelsRef.current, alliancesRef.current, hoveredHex.current, viewBounds, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+
+        // Rectangle terrain preview
+        if (rectStartHex.current && hoveredHex.current && toolRef.current === 'terrain' && terrainRectRef.current) {
+            const sq = rectStartHex.current.q, sr = rectStartHex.current.r;
+            const [eq, er] = hoveredHex.current;
+            const minR = Math.min(sr, er), maxR = Math.max(sr, er);
+            const sCol = toOffsetCol(sq, sr), eCol = toOffsetCol(eq, er);
+            const minCol = Math.min(sCol, eCol), maxCol = Math.max(sCol, eCol);
+            const tColor = TERRAIN_COLORS[terrainColorRef.current] || TERRAIN_COLORS.mountain;
+            ctx.save(); ctx.globalAlpha = 0.4;
+            for (let row = minR; row <= maxR; row++) {
+                for (let col = minCol; col <= maxCol; col++) {
+                    const hq = col - Math.floor((row + 1) / 2);
+                    const [cx, cy] = hex2px(hq, row);
+                    ctx.beginPath();
+                    for (let i = 0; i < 6; i++) { const vx = cx + HEX_VERTS[i][0], vy = cy + HEX_VERTS[i][1]; i === 0 ? ctx.moveTo(vx, vy) : ctx.lineTo(vx, vy); }
+                    ctx.closePath();
+                    ctx.fillStyle = tColor; ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 0.8; ctx.stroke();
+                }
+            }
+            // Dashed border around entire rect
+            const cornerTL = hex2px(minCol - Math.floor((minR + 1) / 2), minR);
+            const cornerBR = hex2px(maxCol - Math.floor((maxR + 1) / 2), maxR);
+            ctx.globalAlpha = 0.8; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+            ctx.strokeRect(cornerTL[0] - HEX_R, cornerTL[1] - HEX_R, cornerBR[0] - cornerTL[0] + HEX_R * 2, cornerBR[1] - cornerTL[1] + HEX_R * 2);
+            ctx.setLineDash([]);
+            // Count label
+            const count = (maxR - minR + 1) * (maxCol - minCol + 1);
+            ctx.globalAlpha = 1; ctx.font = 'bold 14px sans-serif'; ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+            ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 4;
+            ctx.fillText(`${count} 格`, (cornerTL[0] + cornerBR[0]) / 2, cornerTL[1] - HEX_R - 6);
+            ctx.shadowBlur = 0;
+            ctx.restore();
+        }
+
         ctx.restore();
 
         // Keep animating while highlight is active
@@ -1092,7 +1167,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             if (toolRef.current === 'hand') {
                 isDragging.current = true; setIsPanning(true);
                 lastPos.current = { x: t.clientX, y: t.clientY };
-            } else if (toolRef.current === 'building' || toolRef.current === 'eraser') {
+            } else if (toolRef.current === 'building' || toolRef.current === 'eraser' || toolRef.current === 'terrain') {
                 isPainting.current = true; lastPaintHex.current = null;
                 const [wx, wy] = getWorldPosFromClient(t.clientX, t.clientY);
                 const [q, r] = px2hex(wx, wy);
@@ -1179,8 +1254,13 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         }
         if (e.button === 2 || e.button === 1 || (e.button === 0 && toolRef.current === 'hand')) {
             isDragging.current = true; setIsPanning(true); lastPos.current = { x: e.clientX, y: e.clientY }; e.preventDefault();
-        } else if (e.button === 0 && (toolRef.current === 'building' || toolRef.current === 'eraser')) {
+        } else if (e.button === 0 && (toolRef.current === 'building' || toolRef.current === 'eraser' || (toolRef.current === 'terrain' && !terrainRectRef.current))) {
             isPainting.current = true; lastPaintHex.current = null;
+        } else if (e.button === 0 && toolRef.current === 'terrain' && terrainRectRef.current) {
+            // Rectangle terrain mode: record start hex
+            const [rwx, rwy] = getWorldPos(e);
+            const [rq, rr] = px2hex(rwx, rwy);
+            rectStartHex.current = { q: rq, r: rr };
         }
     };
     const handleMouseMove = (e) => {
@@ -1199,6 +1279,10 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             lastPos.current = { x: e.clientX, y: e.clientY };
             offsetRef.current = { x: offsetRef.current.x + dx, y: offsetRef.current.y + dy };
             bgDirtyRef.current = true; requestDraw(); return;
+        }
+        // Rectangle terrain mode: update preview
+        if (rectStartHex.current && toolRef.current === 'terrain' && terrainRectRef.current) {
+            requestDraw(); // repaints interaction layer with rect preview
         }
         if (isPainting.current) {
             const [q, r] = px2hex(wx, wy);
@@ -1219,8 +1303,35 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             requestDraw();
         }
     };
-    const handleMouseUp = () => {
+    const handleMouseUp = (e) => {
         if (draggingText.current) { draggingText.current = null; requestDraw(); }
+        // Rectangle terrain fill on mouse up
+        if (rectStartHex.current && toolRef.current === 'terrain' && terrainRectRef.current) {
+            const [wx, wy] = getWorldPos(e);
+            const [eq, er] = px2hex(wx, wy);
+            const sq = rectStartHex.current.q, sr = rectStartHex.current.r;
+            rectStartHex.current = null;
+            const minR = Math.min(sr, er), maxR = Math.max(sr, er);
+            const sCol = toOffsetCol(sq, sr), eCol = toOffsetCol(eq, er);
+            const minCol = Math.min(sCol, eCol), maxCol = Math.max(sCol, eCol);
+            const tColor = TERRAIN_COLORS[terrainColorRef.current] || TERRAIN_COLORS.mountain;
+            setHexCells(prev => {
+                const nc = { ...prev }; let placed = 0;
+                for (let row = minR; row <= maxR; row++) {
+                    for (let col = minCol; col <= maxCol; col++) {
+                        const hq = col - Math.floor((row + 1) / 2);
+                        const k = `${hq},${row}`;
+                        if (nc[k] && nc[k].type !== 'terrain') continue; // don't overwrite buildings
+                        nc[k] = { type: 'terrain', color: tColor, terrainKind: terrainColorRef.current };
+                        placed++;
+                    }
+                }
+                if (placed > 0) showToast(`🚫 已填充 ${placed} 格禁區`);
+                return nc;
+            });
+            requestDraw();
+            return;
+        }
         const wasPainting = isPainting.current; // F02-1: 記錄是否剛結束拖曳
         isDragging.current = false; setIsPanning(false); isPainting.current = false; lastPaintHex.current = null;
         if (wasPainting) pushHistory(hexCellsRef.current); // 整段拖曳只推一次
@@ -1347,6 +1458,10 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                 HQ_SHAPE.forEach(([oq, or]) => {
                     nc[`${q + oq},${r + or}`] = { type: 'hq', color: activeColor, parent: key, isCenter: oq === 0 && or === 0 };
                 });
+            } else if (t === 'terrain') {
+                if (nc[key] && nc[key].type !== 'terrain') return prev; // don't overwrite buildings
+                const tColor = TERRAIN_COLORS[terrainColorRef.current] || TERRAIN_COLORS.mountain;
+                nc[key] = { type: 'terrain', color: tColor, terrainKind: terrainColorRef.current };
             }
             return nc;
         });
@@ -1400,6 +1515,31 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 )}
                             </div>
                             <ToolBtn active={tool === 'flex_building'} onClick={() => { setTool('flex_building'); setToolPopover(null); }} icon="⛺✨" label="彈性建築(不限區域/配額)" />
+                            {/* terrain tool: click shows terrain popover */}
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'terrain'} onClick={() => { setTool('terrain'); setToolPopover(p => p === 'terrain' ? null : 'terrain'); }} icon={<Ban size={15} />} label="禁區" />
+                                {tool === 'terrain' && toolPopover === 'terrain' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-xl shadow-xl p-2.5 flex flex-col gap-2 min-w-[180px]" onMouseDown={e => e.stopPropagation()}>
+                                        <span className="text-[10px] text-slate-400">禁區類型</span>
+                                        <div className="flex items-center gap-1.5">
+                                            {[['mountain', '🏔️ 山脈', TERRAIN_COLORS.mountain], ['river', '🌊 河流', TERRAIN_COLORS.river], ['enemy', '⚔️ 敵區', TERRAIN_COLORS.enemy]].map(([kind, label, col]) => (
+                                                <button key={kind} onClick={() => setTerrainColor(kind)}
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${terrainColor === kind ? 'ring-2 ring-white text-white' : 'text-slate-300 hover:bg-slate-700'}`}
+                                                    style={{ backgroundColor: col }}>
+                                                    {label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <button onClick={() => setTerrainRect(v => !v)}
+                                                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold transition-colors ${terrainRect ? 'bg-amber-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>
+                                                <Square size={11} /> 矩形框選
+                                            </button>
+                                            <span className="text-[9px] text-slate-500">{terrainRect ? '拖曳框選區域' : '拖曳塗抹'}</span>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             <div className="relative flex items-center">
                                 <ToolBtn active={tool === 'hq'} onClick={() => { setTool('hq'); setToolPopover(p => p === 'hq' ? null : 'hq'); }} icon={<Home size={15} />} label="總部" />
                                 {tool === 'hq' && toolPopover === 'hq' && (
