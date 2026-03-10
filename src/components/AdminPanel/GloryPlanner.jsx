@@ -1624,23 +1624,13 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                         <button onClick={importJSON} className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-yellow-400 border border-slate-700" title="匯入 JSON"><Upload size={13} /></button>
                         {isAdmin && <>
                             <button onClick={publishToCloud} title="發佈到共享區" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-violet-400 border border-slate-700"><Share2 size={13} /></button>
-                            <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="px-2 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold">
-                                ☁️ 共享
-                            </button>
+                            <button onClick={() => { setShowShared(true); loadSharedList(); }} title="共享列表" className="p-1.5 bg-violet-700 text-white rounded-lg hover:bg-violet-600 border border-violet-600 text-[13px] leading-none">☁️</button>
                         </>}
                         <div className="h-6 w-px bg-slate-700" />
-                        <button onClick={() => setShowHelp(true)} className="px-2 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-1 bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition-colors">
-                            <HelpCircle size={12} className="text-amber-400" /> 說明
-                        </button>
-                        <button onClick={() => setShowCoords(!showCoords)} className={`px-2 py-1.5 rounded-lg text-[10px] font-medium flex items-center gap-1 ${showCoords ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}>
-                            <Navigation size={12} /> 座標
-                        </button>
-                        <button onClick={exportPositions} title="匯出座標清單到剪貼簿" className="px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-emerald-500">
-                            📋 複製座標
-                        </button>
-                        <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-amber-500">
-                            📸 匯出圖片
-                        </button>
+                        <button onClick={() => setShowHelp(true)} title="說明" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-white border border-slate-700"><HelpCircle size={13} className="text-amber-400" /></button>
+                        <button onClick={() => setShowCoords(!showCoords)} title={showCoords ? '隱藏格座標' : '顯示格座標'} className={`p-1.5 rounded-lg border ${showCoords ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 border-slate-700'}`}><Navigation size={13} /></button>
+                        <button onClick={exportPositions} title="複製座標清單到剪貼簿" className="p-1.5 bg-emerald-700 text-white rounded-lg hover:bg-emerald-600 border border-emerald-600 text-[13px] leading-none">📋</button>
+                        <button onClick={exportImage} title="匯出圖片" className="p-1.5 bg-amber-600 text-white rounded-lg hover:bg-amber-500 border border-amber-500 text-[13px] leading-none">📸</button>
                     </div>
                 </div>
 
