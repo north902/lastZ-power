@@ -3,7 +3,7 @@ import {
     Trash2, ZoomIn, ZoomOut, Maximize, Home, Hand, Plus, Type,
     Map as MapIcon, Fish, Shield, Users, Undo2, Redo2, Save, Download, Upload, X,
     Share2, Copy, Clock, Navigation, MapPin, MousePointer2, HelpCircle, Eraser,
-    AlignLeft, AlignCenter, AlignRight, Ban, Square
+    AlignLeft, AlignCenter, AlignRight, Ban, Square, Circle
 } from 'lucide-react';
 import { db } from '../../config/firebase';
 import { doc, setDoc, getDocs, deleteDoc, collection, query, orderBy, serverTimestamp } from 'firebase/firestore';
@@ -30,6 +30,8 @@ const LEVEL_MULTI = { 1: 3, 2: 4, 3: 1 };
 const ALLIANCE_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 const TERRAIN_COLORS = { mountain: '#4b5563', river: '#1e40af', enemy: '#991b1b' };
 const MAX_HISTORY = 20;
+// Default compass radius = diagonal of the 27×27 zone
+const ZONE_DIAGONAL = Math.round(Math.sqrt((ZONE_HALF * HEX_R * Math.sqrt(3)) ** 2 + (ZONE_HALF * HEX_R * 1.5) ** 2));
 
 const toOffsetCol = (q, r) => q + Math.floor((r + 1) / 2);
 
@@ -339,7 +341,7 @@ function drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activ
 }
 
 // A01: Interaction layer - hover, ghost preview, highlight ring, hovered text highlight (every mousemove)
-function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0, compassCenter = null, compassRadius = 0) {
     const cells = hexCells;
     const { left, right, top, bottom } = viewBounds;
     const rMin = Math.floor((top - HEX_R * 2) / (HEX_R * 1.5));
@@ -467,13 +469,65 @@ function drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewB
         ctx.fillRect(cell.x - maxW / 2 - 6, cell.y - totalH / 2 - 4, maxW + 12, totalH + 8);
         ctx.restore();
     }
+    // ── Compass circle overlay ──
+    if (compassCenter) {
+        const { x: cx, y: cy } = compassCenter;
+        const r = compassRadius;
+        ctx.save();
+        // Filled circle (very light)
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(99, 179, 237, 0.06)';
+        ctx.fill();
+        // Dashed border
+        ctx.strokeStyle = 'rgba(99, 179, 237, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Zone reference box (27×27 dotted) — in world hex pixels
+        const bx = ZONE_HALF * HEX_R * Math.sqrt(3);
+        const by = ZONE_HALF * HEX_R * 1.5;
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeRect(cx - bx, cy - by, bx * 2, by * 2);
+        ctx.setLineDash([]);
+        // Crosshair at center
+        ctx.strokeStyle = 'rgba(99, 179, 237, 0.7)';
+        ctx.lineWidth = 1.5;
+        const ch = 14;
+        ctx.beginPath();
+        ctx.moveTo(cx - ch, cy); ctx.lineTo(cx + ch, cy);
+        ctx.moveTo(cx, cy - ch); ctx.lineTo(cx, cy + ch);
+        ctx.stroke();
+        // Radius line
+        ctx.strokeStyle = 'rgba(99, 179, 237, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(cx, cy); ctx.lineTo(cx + r, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Labels
+        const hexR = Math.round(r / (HEX_R * Math.sqrt(3)));
+        ctx.fillStyle = 'rgba(99, 179, 237, 0.95)';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        ctx.fillText(`半徑 ${hexR} 格(約${Math.round(r)}px)`, cx + r / 2 - 20, cy - 6);
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.7)';
+        ctx.font = '10px sans-serif';
+        ctx.fillText('27×27 區域', cx + bx, cy - by - 4);
+        ctx.restore();
+    }
 }
 
 // A01: Compatibility wrapper used by exportImage (single-canvas path)
-function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0) {
+function drawGloryMap(ctx, hexCells, textLabels, originPoint, alliances, activeId, hoveredHex, viewBounds, showCoords = false, tool = 'hand', toolLevel = 1, activeAlliance = null, hoveredTextId = null, highlightKeys = null, highlightAge = 0, compassCenter = null, compassRadius = 0) {
     const cells = hexCells; // A05: alias for internal use
     drawBackground(ctx, hexCells, textLabels, originPoint, alliances, activeId, viewBounds, showCoords);
-    drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool, toolLevel, activeAlliance, hoveredTextId, highlightKeys, highlightAge);
+    drawInteraction(ctx, hexCells, textLabels, alliances, hoveredHex, viewBounds, tool, toolLevel, activeAlliance, hoveredTextId, highlightKeys, highlightAge, compassCenter, compassRadius);
 }
 
 
@@ -504,6 +558,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const [originInput, setOriginInput] = useState(null);
     const [isPanning, setIsPanning] = useState(false);
     const [hoveredTextId, setHoveredTextId] = useState(null);
+    const [compassCenter, setCompassCenter] = useState(null); // {x,y} in world coords
+    const [compassRadius, setCompassRadius] = useState(ZONE_DIAGONAL); // world px
     const [showExportList, setShowExportList] = useState(false);
     const [exportTextData, setExportTextData] = useState('');
     const [hoverCoordText, setHoverCoordText] = useState('');
@@ -535,6 +591,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     const touchStartPos = useRef(null);   // A03: { x, y } for single-finger tap detection
     const pinchStartDist = useRef(null);  // A03: initial distance for pinch-to-zoom
     const pinchStartZoom = useRef(null);  // A03: zoom at pinch start
+    const compassCenterRef = useRef(null);
+    const compassRadiusRef = useRef(ZONE_DIAGONAL);
 
     const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 1800); };
     const pushHistory = (nc) => {
@@ -563,6 +621,8 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
     useEffect(() => { terrainRectRef.current = terrainRect; }, [terrainRect]);
     useEffect(() => { textInputRef.current = textInput; if (textInput !== null) { bgDirtyRef.current = true; requestDraw(); } else { bgDirtyRef.current = true; requestDraw(); } }, [textInput]);
     useEffect(() => { showCoordsRef.current = showCoords; bgDirtyRef.current = true; requestDraw(); }, [showCoords]);
+    useEffect(() => { compassRadiusRef.current = compassRadius; requestDraw(); }, [compassRadius]);
+    useEffect(() => { compassCenterRef.current = compassCenter; requestDraw(); }, [compassCenter]);
 
     // F03: 一次掃描產生計數 map，供 countBuildings 使用
     const recomputeCounts = (cellsObj) => {
@@ -931,7 +991,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         tCtx.fillStyle = '#0f172a'; tCtx.fillRect(0, 0, w, h);
         tCtx.translate(w / 2 - centerX, h / 2 - centerY);
         const exportBounds = { left: centerX - w / 2, right: centerX + w / 2, top: centerY - h / 2, bottom: centerY + h / 2 };
-        drawGloryMap(tCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, as, null, null, exportBounds, false);
+        drawGloryMap(tCtx, hexCellsRef.current, textLabelsRef.current, originRef.current, as, null, null, exportBounds, false, 'hand', 1, null, null, null, 0, compassCenterRef.current, compassRadiusRef.current);
 
         // ── Legend panel ──
         const LEGEND_H = 48;
@@ -1101,7 +1161,7 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
         ctx.save(); ctx.scale(dpr, dpr);
         ctx.translate(offsetRef.current.x, offsetRef.current.y);
         ctx.scale(z, z);
-        drawInteraction(ctx, hexCellsRef.current, textLabelsRef.current, alliancesRef.current, hoveredHex.current, viewBounds, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge);
+        drawInteraction(ctx, hexCellsRef.current, textLabelsRef.current, alliancesRef.current, hoveredHex.current, viewBounds, toolRef.current, toolLevelRef.current, activeA, toolRef.current === 'hand' ? hoveredTextId : null, hl ? hl.keys : null, hlAge, compassCenterRef.current, compassRadiusRef.current);
 
         // Rectangle terrain preview
         if (rectStartHex.current && hoveredHex.current && toolRef.current === 'terrain' && terrainRectRef.current) {
@@ -1389,6 +1449,12 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
             setTextInput({ x: wx, y: wy, val: '', color: textColorRef.current, size: textSizeRef.current, align: textAlignRef.current, editId: null });
             return;
         }
+        if (t === 'compass') {
+            compassCenterRef.current = { x: wx, y: wy };
+            setCompassCenter({ x: wx, y: wy });
+            requestDraw();
+            return;
+        }
         if (t === 'origin') {
             setOriginInput({ q, r });
             return;
@@ -1601,6 +1667,55 @@ export const GloryPlanner = ({ onSwitchMap, isAdmin = false }) => {
                                 )}
                             </div>
                             <ToolBtn active={tool === 'eraser'} onClick={() => { setTool('eraser'); setToolPopover(null); }} icon={<Eraser size={15} />} label="橡皮擦" />
+                            {/* compass tool */}
+                            <div className="relative flex items-center">
+                                <ToolBtn active={tool === 'compass'} onClick={() => { setTool('compass'); setToolPopover(p => p === 'compass' ? null : 'compass'); }} icon={<Circle size={15} />} label="圓規(半徑圓)" />
+                                {tool === 'compass' && toolPopover === 'compass' && (
+                                    <div className="absolute top-full left-0 mt-1 z-50 bg-slate-800 border border-slate-600 rounded-xl shadow-xl p-3 flex flex-col gap-3 min-w-[220px]" onMouseDown={e => e.stopPropagation()}>
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-[10px] text-cyan-400 font-bold">○ 圓規工具</span>
+                                            <span className="text-[9px] text-slate-500">點擊地圖設置圓心</span>
+                                        </div>
+                                        {/* Radius slider */}
+                                        <div className="flex flex-col gap-1.5">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-[10px] text-slate-400">半徑</span>
+                                                <span className="text-[10px] font-mono text-cyan-300">
+                                                    {Math.round(compassRadius)}px
+                                                    &nbsp;≈ <span className="text-amber-300">{Math.round(compassRadius / (HEX_R * Math.sqrt(3)))}</span> 格
+                                                </span>
+                                            </div>
+                                            <input type="range" min={100} max={2000} step={10}
+                                                value={compassRadius}
+                                                onChange={e => setCompassRadius(Number(e.target.value))}
+                                                className="w-full h-1.5 bg-slate-700 rounded cursor-pointer accent-cyan-400" />
+                                            <div className="flex items-center gap-1.5 mt-1">
+                                                {/* Quick presets */}
+                                                {[
+                                                    { label: '27\u00d727\u5c0d\u89d2', val: ZONE_DIAGONAL },
+                                                    { label: '橫徑bx', val: Math.round(ZONE_HALF * HEX_R * Math.sqrt(3)) },
+                                                    { label: '縱徑by', val: Math.round(ZONE_HALF * HEX_R * 1.5) },
+                                                ].map(({ label, val }) => (
+                                                    <button key={label} onClick={() => setCompassRadius(val)}
+                                                        className={`flex-1 px-1.5 py-1 text-[9px] font-bold rounded transition-colors ${compassRadius === val
+                                                            ? 'bg-cyan-600 text-white'
+                                                            : 'bg-slate-700 text-slate-300 hover:bg-cyan-700 hover:text-white'
+                                                            }`}>
+                                                        {label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        {/* Clear */}
+                                        {compassCenter && (
+                                            <button onClick={() => { setCompassCenter(null); compassCenterRef.current = null; requestDraw(); }}
+                                                className="text-[10px] text-red-400/70 hover:text-red-400 transition-colors text-left">
+                                                × 清除圓
+                                            </button>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div className="h-6 w-px bg-slate-700" />
                         <div className="flex bg-slate-800 rounded-lg p-1">
