@@ -300,6 +300,9 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     const [originInput, setOriginInput] = useState(null);
     const [isPanning, setIsPanning] = useState(false);
     const [hoveredTextId, setHoveredTextId] = useState(null);
+    const [hoverCoordText, setHoverCoordText] = useState('');
+    const [showExportList, setShowExportList] = useState(false);
+    const [exportTextData, setExportTextData] = useState('');
 
     // History
     const historyRef = useRef([{}]);
@@ -464,6 +467,62 @@ export const SvsPlanner = ({ isAdmin = false }) => {
     };
     const resetMap = () => { if (!window.confirm('確定要重置地圖？')) return; const nc = mapModeRef.current === 'svs' ? buildSvsCells() : buildFishpondCells(); skipHistory.current = true; setCells(nc); historyRef.current = [JSON.parse(JSON.stringify(nc))]; historyIdx.current = 0; };
     const centerMap = () => { if (!containerRef.current) return; const r = containerRef.current.getBoundingClientRect(); offsetRef.current = { x: r.width / 2, y: r.height / 2 }; requestDraw(); };
+
+    const exportPositions = () => {
+        const origin = cellsRef.current.origin;
+        if (!origin) { showToast('❌ 請先校正原點座標！'); return; }
+        const { q: q0, r: r0, x: x0, y: y0 } = origin;
+        const cs = cellsRef.current;
+        const output = [];
+        output.push(`【${mapModeRef.current === 'svs' ? 'SVS戰略' : '魚池防守'}座標清單】`);
+
+        const items = [];
+        Object.keys(cs).forEach(key => {
+            const cell = cs[key];
+            if (!cell || (!cell.isCenter && cell.type !== 'text')) return;
+            if (key === 'origin' || key.startsWith('text_')) return;
+
+            const [q, r] = key.split(',').map(Number);
+            const gy = r - r0 + y0;
+            const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+
+            let title = '';
+            if (cell.type === 'hq') title = `總部 ${cell.label || ''}`;
+            else if (cell.type === 'cannon') title = `哨塔 ${cell.label || ''}`;
+            else if (cell.type === 'battery') title = `砲台 ${cell.label || ''}`;
+            else if (cell.type === 'building') title = `小建築`;
+
+            if (title) items.push({ title, gx, gy });
+        });
+
+        items.sort((a, b) => a.gy !== b.gy ? a.gy - b.gy : a.gx - b.gx);
+        items.forEach(item => output.push(`- ${item.title}: (${item.gx}, ${item.gy})`));
+
+        // Text labels
+        const textItems = [];
+        Object.keys(cs).filter(k => k.startsWith('text_')).forEach(k => {
+            const t = cs[k];
+            const [q, r] = px2hex(t.x, t.y);
+            const gy = r - r0 + y0;
+            const gx = q - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+            textItems.push({ title: `標註: ${t.label}`, gx, gy });
+        });
+        if (textItems.length > 0) {
+            output.push('', '【文字標註】');
+            textItems.sort((a, b) => a.gy !== b.gy ? a.gy - b.gy : a.gx - b.gx);
+            textItems.forEach(item => output.push(`- ${item.title}: (${item.gx}, ${item.gy})`));
+        }
+
+        const textToCopy = output.join('\n').trim();
+        if (!textToCopy) { showToast('⚠️ 沒有可匯出的座標'); return; }
+        setExportTextData(textToCopy);
+        setShowExportList(true);
+        navigator.clipboard.writeText(textToCopy).then(() => {
+            showToast('📋 座標清單已複製到剪貼簿！');
+        }).catch(() => {
+            showToast('❌ 複製失敗，請手動複製右側清單內容');
+        });
+    };
 
     // --- Full-map PNG export ---
     const exportImage = () => {
@@ -633,7 +692,19 @@ export const SvsPlanner = ({ isAdmin = false }) => {
 
         const [hq, hr] = px2hex(wx, wy);
         const p = hoveredHex.current;
-        if (!p || p[0] !== hq || p[1] !== hr) { hoveredHex.current = [hq, hr]; requestDraw(); }
+        if (!p || p[0] !== hq || p[1] !== hr) { 
+            hoveredHex.current = [hq, hr]; 
+            const origin = cellsRef.current.origin;
+            if (origin) {
+                const { q: q0, r: r0, x: x0, y: y0 } = origin;
+                const gy = hr - r0 + y0;
+                const gx = hq - q0 + Math.floor(gy / 2) - Math.floor(y0 / 2) + x0;
+                setHoverCoordText(`(${gx}, ${gy})`);
+            } else {
+                setHoverCoordText(`(${hq}, ${hr})`);
+            }
+            requestDraw(); 
+        }
     };
     const handleMouseUp = (e) => {
         if (draggingText.current) { draggingText.current = null; requestDraw(); }
@@ -822,19 +893,56 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                         </button>
                     </>}
                     <div className="h-6 w-px bg-slate-700" />
+                    <button onClick={exportPositions} title="輸出座標清單" className="p-1.5 bg-slate-800 text-slate-400 rounded-lg hover:text-emerald-400 border border-slate-700">
+                        <Copy size={13} />
+                    </button>
                     <button onClick={exportImage} className="px-2.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-[10px] font-bold shadow-lg hover:from-blue-500">
                         📸 匯出圖片
                     </button>
                 </div>
             </div>
 
+            {/* Main Area */}
+            <div className="flex flex-1 overflow-hidden relative">
+                {showExportList && (
+                    <div className="w-64 bg-slate-900 border-r border-slate-800 overflow-y-auto flex flex-col flex-shrink-0 z-10 shadow-xl">
+                        <div className="p-3 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900/90 backdrop-blur">
+                            <h3 className="font-bold text-blue-400 text-sm flex items-center gap-2"><MapPin size={14} /> 座標清單</h3>
+                            <button onClick={() => setShowExportList(false)} className="text-slate-400 hover:text-white p-1 bg-slate-800 rounded">
+                                <X size={14} />
+                            </button>
+                        </div>
+                        <div className="p-3">
+                            <textarea
+                                readOnly
+                                value={exportTextData}
+                                className="w-full h-[500px] bg-slate-950 text-slate-300 text-xs p-2 rounded outline-none border border-slate-800 resize-none font-mono tracking-wider leading-relaxed"
+                            />
+                            <button
+                                onClick={() => { navigator.clipboard.writeText(exportTextData); showToast('📋 已重新複製'); }}
+                                className="w-full mt-3 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-colors"
+                            >
+                                <Copy size={12} /> 重新複製到剪貼簿
+                            </button>
+                        </div>
+                    </div>
+                )}
+
             {/* Canvas */}
             <div ref={containerRef} className="flex-1 relative overflow-hidden">
                 <canvas ref={canvasRef} className={`absolute inset-0 ${cursorClass}`}
                     onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp}
-                    onClick={handleClick} onDoubleClick={handleDoubleClick}
-                    onMouseLeave={() => { isDragging.current = false; draggingText.current = null; hoveredHex.current = null; requestDraw(); }}
+                    onClick={(e) => { e.stopPropagation(); handleClick(e); }} onDoubleClick={handleDoubleClick}
+                    onMouseLeave={() => { isDragging.current = false; draggingText.current = null; hoveredHex.current = null; setHoverCoordText(''); requestDraw(); }}
                     onContextMenu={e => e.preventDefault()} />
+
+                {!!hoverCoordText && (
+                    <div className="absolute top-3 right-3 z-30 pointer-events-none">
+                        <div className="px-2.5 py-1.5 rounded-lg bg-slate-950/70 border border-slate-700 backdrop-blur text-[11px] font-mono text-blue-400 shadow-lg">
+                            {hoverCoordText}
+                        </div>
+                    </div>
+                )}
 
                 {textInput && (
                     <input
@@ -968,6 +1076,7 @@ export const SvsPlanner = ({ isAdmin = false }) => {
                 </div>
             </div>
         </div>
+    </div>
     );
 };
 
