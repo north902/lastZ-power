@@ -24,7 +24,17 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('form');
+  const VALID_TABS = ['form', 'calculator', 'survey', 'admin', 'planner'];
+  const getInitialTab = () => {
+    const hash = window.location.hash.replace('#', '');
+    return VALID_TABS.includes(hash) ? hash : 'form';
+  };
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+
+  const switchTab = (tab) => {
+    setActiveTab(tab);
+    window.location.hash = tab;
+  };
   const [isLoginMode, setIsLoginMode] = useState(false);
   const { user, isAdmin, loading } = useAuth();
   const { lang, t, toggleLang } = useLanguage();
@@ -161,7 +171,7 @@ function App() {
         <div className={`mx-auto ${activeTab === 'planner' ? 'w-full flex-1 flex flex-col min-h-0' : 'max-w-7xl px-4 py-8 md:py-12'}`}>
           <div className={`p-1 bg-white border-b border-gray-200 shadow-sm overflow-x-auto w-full shrink-0 z-10 ${activeTab === 'planner' ? 'flex items-center ps-4 pe-4' : 'inline-flex rounded-2xl mb-10 max-w-full'}`}>
             <button
-              onClick={() => setActiveTab('form')}
+              onClick={() => switchTab('form')}
               className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'form'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
                 : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
@@ -170,7 +180,7 @@ function App() {
               <Layout size={18} /> {t('personal_entry')}
             </button>
             <button
-              onClick={() => setActiveTab('calculator')}
+              onClick={() => switchTab('calculator')}
               className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'calculator'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
                 : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
@@ -179,7 +189,7 @@ function App() {
               <Calculator size={18} /> {t('duel_calculator')}
             </button>
             <button
-              onClick={() => setActiveTab('survey')}
+              onClick={() => switchTab('survey')}
               className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'survey'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
                 : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
@@ -190,7 +200,7 @@ function App() {
             {isAdmin && (
               <>
                 <button
-                  onClick={() => setActiveTab('admin')}
+                  onClick={() => switchTab('admin')}
                   className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'admin'
                     ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
                     : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
@@ -199,7 +209,7 @@ function App() {
                   <ShieldCheck size={18} /> {t('all_management')}
                 </button>
                 <button
-                  onClick={() => setActiveTab('planner')}
+                  onClick={() => switchTab('planner')}
                   className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'planner'
                     ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
                     : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
