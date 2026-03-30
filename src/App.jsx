@@ -7,6 +7,7 @@ import Login from './components/Auth/AuthForm';
 import PowerForm from './components/UserForm/UserForm';
 import AdminPanel from './components/AdminPanel/AdminPanel';
 import DuelCalculator from './components/DuelCalculator/DuelCalculator';
+import Survey from './components/Survey/Survey';
 import {
   LogOut,
   ShieldCheck,
@@ -16,7 +17,8 @@ import {
   Loader2,
   Sword,
   Map as MapIcon,
-  Languages
+  Languages,
+  ClipboardList
 } from 'lucide-react';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -176,6 +178,15 @@ function App() {
             >
               <Calculator size={18} /> {t('duel_calculator')}
             </button>
+            <button
+              onClick={() => setActiveTab('survey')}
+              className={`flex items-center gap-2 py-2.5 px-6 rounded-xl text-sm font-bold transition-all duration-300 whitespace-nowrap ${activeTab === 'survey'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-indigo-100'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+                }`}
+            >
+              <ClipboardList size={18} /> 問卷調查
+            </button>
             {isAdmin && (
               <>
                 <button
@@ -209,6 +220,7 @@ function App() {
             )}
             {activeTab === 'form' && <PowerForm user={user} />}
             {activeTab === 'calculator' && <DuelCalculator />}
+            {activeTab === 'survey' && <Survey />}
           </div>
         </div>
       </main>

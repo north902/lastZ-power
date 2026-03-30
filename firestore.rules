@@ -76,5 +76,21 @@ service cloud.firestore {
       allow create: if isAdmin();
       allow delete: if isAdmin();
     }
+
+    // 5. 問卷回應（任何已登入用戶可寫，管理員可讀）
+    match /survey_responses/{docId} {
+      // 任何已登入用戶（含匿名）都可以新增回應
+      allow create: if request.auth != null;
+      // 只有管理員可以讀取所有回應
+      allow read, list: if isAdmin();
+      // 不允許從客戶端修改或刪除
+      allow update, delete: if false;
+    }
+
+    // 6. 問卷設定（已登入即可讀取邀請碼；寫入限管理員）
+    match /config/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
   }
 }

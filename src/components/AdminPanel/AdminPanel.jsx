@@ -11,6 +11,7 @@ import { formatPower, formatDateTime } from '../../utils/validation';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../hooks/useAuth';
 import { SvsPlanner } from './SvsPlanner';
+import SurveyResults from '../Survey/SurveyResults';
 import {
   RefreshCw,
   Download,
@@ -31,12 +32,15 @@ import {
   Swords,
   PieChart,
   LayoutGrid,
-  Map as MapIcon
+  Map as MapIcon,
+  ClipboardList
 } from 'lucide-react';
 
 const AdminPanel = ({ forcePlanner = false }) => {
   const { t } = useLanguage();
   const { adminData } = useAuth();
+  // Super-admin flag comes from Firestore: admins/{uid}.isSuperAdmin = true
+  const isSuperAdmin = adminData?.isSuperAdmin === true;
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -354,6 +358,14 @@ const AdminPanel = ({ forcePlanner = false }) => {
               >
                 <LayoutGrid size={14} /> {t('view_alliances')}
               </button>
+              {isSuperAdmin && (
+                <button
+                  onClick={() => setViewMode('survey')}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight flex items-center gap-1.5 transition-all ${viewMode === 'survey' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}
+                >
+                  <ClipboardList size={14} /> 問卷分析
+                </button>
+              )}
             </div>
             <button
               onClick={loadAllUsers}
@@ -422,7 +434,11 @@ const AdminPanel = ({ forcePlanner = false }) => {
         )}
 
         <div className={forcePlanner ? "flex-1 flex flex-col min-h-0" : "overflow-x-auto"}>
-          {viewMode === 'planner' ? (
+          {viewMode === 'survey' && isSuperAdmin ? (
+            <div className="p-6">
+              <SurveyResults />
+            </div>
+          ) : viewMode === 'planner' ? (
             <div className={forcePlanner ? "flex-1 flex flex-col min-h-0" : "p-4 bg-slate-950"}>
               <SvsPlanner isAdmin={!!adminData} />
             </div>
